@@ -5,6 +5,7 @@ const http = require('http');
 const fs = require('fs');
 
 let mainWindow;
+let overlayWindow;
 let pythonProcess = null;
 
 // Helper to check if a port is in use
@@ -64,6 +65,41 @@ function killPythonProcess() {
     }
 }
 
+function createOverlayWindow() {
+  const { screen } = require('electron');
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width, height } = primaryDisplay.bounds;
+
+  overlayWindow = new BrowserWindow({
+    x: 0,
+    y: 0,
+    width,
+    height,
+    transparent: true,
+    frame: false,
+    hasShadow: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+    },
+  });
+
+  // Make the window click-through
+  overlayWindow.setIgnoreMouseEvents(true);
+
+  const isDev = process.env.NODE_ENV !== 'production' && !app.isPackaged;
+  if (isDev) {
+    overlayWindow.loadURL('http://localhost:5173/overlay.html').catch(e => console.log('Overlay dev load error', e));
+  } else {
+    overlayWindow.loadFile(path.join(__dirname, 'dist', 'overlay.html'));
+  }
+
+  // Initially hidden
+  overlayWindow.hide();
+}
+
 async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 450,
@@ -73,6 +109,8 @@ async function createWindow() {
       contextIsolation: false, // For simplicity in HitL demo
     },
   });
+
+  createOverlayWindow();
 
   const isDev = process.env.NODE_ENV !== 'production' && !app.isPackaged;
 
@@ -101,6 +139,20 @@ async function createWindow() {
 app.whenReady().then(async () => {
   await startPythonBackend();
   createWindow();
+
+  // Setup IPC for overlay
+  ipcMain.on('show-overlay', (event, data) => {
+    if (overlayWindow) {
+      overlayWindow.webContents.send('draw-bbox', data);
+      overlayWindow.showInactive(); // Show without taking focus
+    }
+  });
+
+  ipcMain.on('hide-overlay', () => {
+    if (overlayWindow) {
+      overlayWindow.hide();
+    }
+  });
 
   // Register Global Hotkey (Cmd/Ctrl + Shift + Esc)
   globalShortcut.register('CommandOrControl+Shift+Escape', () => {

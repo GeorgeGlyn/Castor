@@ -49,6 +49,9 @@ function ChatWindow() {
       } else if (data.type === 'hitl_request') {
         setHitlRequest(data);
         currentThoughtRef.current = ''; // Reset thought for next iteration
+        if (ipcRenderer) {
+            ipcRenderer.send('show-overlay', data);
+        }
       }
     };
 
@@ -93,6 +96,7 @@ function ChatWindow() {
     if (ws) {
       ws.send(JSON.stringify({ action: 'approve_action' }));
       setHitlRequest(null);
+      if (ipcRenderer) ipcRenderer.send('hide-overlay');
     }
   };
 
@@ -100,6 +104,7 @@ function ChatWindow() {
     if (ws) {
       ws.send(JSON.stringify({ action: 'reject_action' }));
       setHitlRequest(null);
+      if (ipcRenderer) ipcRenderer.send('hide-overlay');
     }
   };
 

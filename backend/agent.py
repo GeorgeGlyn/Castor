@@ -206,11 +206,18 @@ class AgentLoop:
 
                 scaled_x = grounding_data.get("x", 0)
                 scaled_y = grounding_data.get("y", 0)
+                bbox = grounding_data.get("bbox", [0, 0, 0, 0])
                 is_micro = grounding_data.get("is_micro_target", False)
 
-                # Upscale coordinates
+                # Upscale coordinates and bounding box
                 physical_x = int(scaled_x / scale_factor) + monitor["left"]
                 physical_y = int(scaled_y / scale_factor) + monitor["top"]
+                physical_bbox = [
+                    int(bbox[0] / scale_factor) + monitor["left"],
+                    int(bbox[1] / scale_factor) + monitor["top"],
+                    int(bbox[2] / scale_factor),
+                    int(bbox[3] / scale_factor)
+                ]
 
                 if hitl_enabled:
                     await self.send_status("Waiting for HitL approval...")
@@ -222,6 +229,7 @@ class AgentLoop:
                         "action": semantic_action,
                         "x": physical_x,
                         "y": physical_y,
+                        "bbox": physical_bbox,
                         "is_micro_target": is_micro
                     })
 
