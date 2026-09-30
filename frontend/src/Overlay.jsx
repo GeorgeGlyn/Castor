@@ -38,24 +38,27 @@ function Overlay() {
           top: `${y}px`,
           width: `${width}px`,
           height: `${height}px`,
-          border: '2px solid red',
-          backgroundColor: 'rgba(255, 0, 0, 0.2)',
-          boxShadow: '0 0 10px red, inset 0 0 10px red',
-          pointerEvents: 'none', // Ensure it doesn't block clicks
-          zIndex: 9999
+          border: '2px solid rgba(239, 68, 68, 0.9)',
+          backgroundColor: 'rgba(239, 68, 68, 0.12)',
+          boxShadow: '0 0 12px rgba(239, 68, 68, 0.6), inset 0 0 8px rgba(239, 68, 68, 0.15)',
+          pointerEvents: 'none',
+          overflow: 'visible',  // Allow click-dot to render outside bbox bounds
+          zIndex: 9999,
+          animation: 'pulse-border 1.5s ease-in-out infinite',
         }}
       >
-        {/* Exact Click Point */}
+        {/* Exact Click Point — centered on the target coordinate */}
         <div
           style={{
             position: 'absolute',
-            left: `${targetX - x - 3}px`, // Center the dot
-            top: `${targetY - y - 3}px`,
-            width: '6px',
-            height: '6px',
-            backgroundColor: 'yellow',
+            left: `${targetX - x - 5}px`,
+            top: `${targetY - y - 5}px`,
+            width: '10px',
+            height: '10px',
+            backgroundColor: 'rgba(250, 204, 21, 0.95)',
             borderRadius: '50%',
-            boxShadow: '0 0 5px yellow'
+            boxShadow: '0 0 8px rgba(250, 204, 21, 0.8), 0 0 20px rgba(250, 204, 21, 0.4)',
+            border: '2px solid white',
           }}
         />
         {/* Label */}

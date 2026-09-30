@@ -37,18 +37,37 @@ function getPythonExecutable() {
 }
 
 async function startPythonBackend() {
-  const isHealthy = await checkBackendHealthy(8000);
-  if (isHealthy) {
-    console.log('Castor backend already running on port 8000. Skipping spawn.');
-    return;
-  }
+  // Always kill any stale backend on port 8000 so fresh code and .env values are loaded.
+  try {
+    const { execSync } = require('child_process');
+    if (process.platform === 'win32') {
+      const output = execSync('netstat -ano', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      const pids = new Set();
+      for (const line of output.split('\n')) {
+        if (line.includes(':8000') && line.includes('LISTENING')) {
+          const parts = line.trim().split(/\s+/);
+          const pid = parts[parts.length - 1];
+          if (/^\d+$/.test(pid) && pid !== '0') {
+            pids.add(pid);
+          }
+        }
+      }
+      for (const pid of pids) {
+        try {
+          execSync(`taskkill /PID ${pid} /F`, { stdio: 'ignore' });
+          console.log(`Terminated stale process on port 8000: PID ${pid}`);
+        } catch (_) {}
+      }
+    } else {
+      execSync('lsof -ti:8000 | xargs kill -9', { stdio: 'ignore' });
+    }
+  } catch (_) { /* Nothing was running */ }
 
   const pythonExec = getPythonExecutable();
   console.log(`Starting Python backend using: ${pythonExec}`);
-  const backendMain = path.join(__dirname, '..', 'backend', 'main.py');
 
   pythonProcess = spawn(pythonExec, ['-m', 'backend.main'], {
-    cwd: path.join(__dirname, '..'), // Run from root so module resolves
+    cwd: path.join(__dirname, '..'),
     stdio: 'inherit'
   });
 
@@ -80,7 +99,7 @@ function createOverlayWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js')
+      preload: path.join(__dirname, 'preload.cjs')  // Updated to .cjs
     },
   });
 
@@ -102,17 +121,25 @@ function createOverlayWindow() {
 }
 
 async function createWindow() {
+  const { screen } = require('electron');
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
+  const winWidth = 420;
+  const winHeight = Math.min(800, screenHeight - 60);
+
   mainWindow = new BrowserWindow({
-    width: 450,
-    height: 760,
-    minWidth: 380,
-    minHeight: 600,
+    width: winWidth,
+    height: winHeight,
+    x: Math.max(0, screenWidth - winWidth - 15),
+    y: Math.max(20, Math.floor((screenHeight - winHeight) / 2)),
+    minWidth: 350,
+    minHeight: 500,
     title: 'Castor AI',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js'),
-      sandbox: true,  // Extra security: limits renderer process capabilities
+      preload: path.join(__dirname, 'preload.cjs'),  // Updated to .cjs
+      sandbox: true,
     },
   });
 
@@ -136,8 +163,6 @@ async function createWindow() {
   // Request macOS permissions if applicable
   if (process.platform === 'darwin') {
     systemPreferences.askForMediaAccess('screen');
-    // Note: Accessibility permission on macOS must usually be granted manually via System Settings
-    // systemPreferences.isTrustedAccessibilityClient(true) can be used to prompt.
     systemPreferences.isTrustedAccessibilityClient(true);
   }
 }
@@ -160,17 +185,18 @@ app.whenReady().then(async () => {
     }
   });
 
+  ipcMain.on('minimize-main-window', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.minimize();
+    }
+  });
+
   // Register Global Hotkey (Cmd/Ctrl + Shift + Esc)
   globalShortcut.register('CommandOrControl+Shift+Escape', () => {
     console.log('Kill switch activated!');
     if (mainWindow) {
-        // Step 1: Send abort via renderer IPC to forward over WS
         mainWindow.webContents.send('trigger-abort');
-
-        // Step 2 & 3: Fallback kill OS process after 1 second if it doesn't shut down
-        setTimeout(() => {
-            killPythonProcess();
-        }, 1000);
+        setTimeout(() => { killPythonProcess(); }, 1000);
     } else {
         killPythonProcess();
     }
