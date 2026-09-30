@@ -28,6 +28,7 @@ class ActionParams(BaseModel):
     clicks: Optional[int] = None # For scroll
 
 class PlannerResponse(BaseModel):
+    thought_process: str
     scratchpad: Scratchpad
     actions: list[ActionParams]
 
@@ -105,7 +106,7 @@ class AgentLoop:
             "You are an expert Desktop AI Planner. "
             "You will be given a screenshot of the user's desktop, their goal, and the current scratchpad state. "
             "You must manage your scratchpad to keep track of long-horizon tasks. "
-            "You must output a <thought> block detailing your spatial reasoning and visual analysis BEFORE outputting your actions array. "
+            "You must detail your spatial reasoning and visual analysis in the 'thought_process' field. "
             "You can output multiple batched actions to execute in sequence. "
             "Valid actions are: 'click', 'drag', 'type', 'hotkey', 'scroll', 'bash', 'done'. "
             "For UI clicks/drags, describe the 'target' (and 'destination') semantically (e.g., 'Submit Button'). "
@@ -160,59 +161,39 @@ class AgentLoop:
                 request_content = types.Content(role="user", parts=planner_parts)
                 current_history = history + [request_content]
 
-                # Streaming from Gemini in thread to not block WS (genai stream is sync)
-                def get_stream():
-                    return self.client.models.generate_content_stream(
+                def call_planner():
+                    return self.client.models.generate_content(
                         model=self.planner_model,
                         contents=current_history,
                         config=types.GenerateContentConfig(
                             system_instruction=planner_system_instruction,
-                            temperature=0.0
+                            temperature=0.0,
+                            response_mime_type="application/json",
+                            response_schema=PlannerResponse,
                         )
                     )
 
-                response_stream = await asyncio.to_thread(get_stream)
-
-                full_response_text = ""
-                # We need to iterate over the generator without blocking the main event loop
-                def next_chunk(stream):
-                    try:
-                        return next(stream)
-                    except StopIteration:
-                        return None
-
-                while self.is_running:
-                    chunk = await asyncio.to_thread(next_chunk, response_stream)
-                    if chunk is None:
-                        break
-
-                    if chunk.text:
-                        full_response_text += chunk.text
-                        await self.websocket.send_json({
-                            "type": "thought_chunk",
-                            "text": chunk.text
-                        })
+                planner_res = await asyncio.to_thread(call_planner)
 
                 if not self.is_running:
                     break
 
                 history.append(request_content)
-                history.append(types.Content(role="model", parts=[types.Part.from_text(full_response_text)]))
+                history.append(types.Content(role="model", parts=[types.Part.from_text(planner_res.text)]))
 
-                # Extract the JSON payload after </thought>
                 try:
-                    json_str = full_response_text.split("</thought>")[-1].strip()
-                    # Clean markdown code blocks if present
-                    if json_str.startswith("```json"):
-                        json_str = json_str[7:-3]
-                    elif json_str.startswith("```"):
-                        json_str = json_str[3:-3]
-                    planner_data = json.loads(json_str)
+                    planner_data = json.loads(planner_res.text)
                     planner_response = PlannerResponse(**planner_data)
                 except Exception as e:
                     await self.send_status(f"Failed to parse planner output: {e}")
-                    history.append(types.Content(role="user", parts=[types.Part.from_text("Invalid JSON format. Please output valid JSON matching the schema after the </thought> block.")]))
+                    history.append(types.Content(role="user", parts=[types.Part.from_text("Invalid JSON format.")]))
                     continue
+
+                # Stream the thought process immediately
+                await self.websocket.send_json({
+                    "type": "thought_chunk",
+                    "text": planner_response.thought_process
+                })
 
                 # Update scratchpad
                 current_scratchpad = planner_response.scratchpad
@@ -223,7 +204,9 @@ class AgentLoop:
 
                 # Process batched actions
                 for action_param in planner_response.actions:
+                    await asyncio.sleep(0.1) # Yield to event loop to allow abort signals to process mid-batch
                     if not self.is_running:
+                        await self.send_status("Abort received. Halting batch.")
                         break
 
                     action_type = action_param.action
@@ -257,11 +240,16 @@ class AgentLoop:
                             stderr=asyncio.subprocess.PIPE,
                             cwd=os.path.join(os.path.dirname(__file__), "..") # run from root
                         )
-                        stdout, stderr = await process.communicate()
-                        out_str = stdout.decode()
-                        err_str = stderr.decode()
+                        try:
+                            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=15.0)
+                            out_str = stdout.decode()
+                            err_str = stderr.decode()
+                            bash_result = f"Bash exit {process.returncode}.\nSTDOUT: {out_str}\nSTDERR: {err_str}"
+                        except asyncio.TimeoutError:
+                            process.kill()
+                            bash_result = "ERROR: Bash command timed out after 15 seconds. It may be waiting for user input or in an infinite loop. Use non-interactive flags or run in background."
+                            await self.send_status("Bash timeout killed.")
 
-                        bash_result = f"Bash exit {process.returncode}.\nSTDOUT: {out_str}\nSTDERR: {err_str}"
                         history.append(types.Content(role="user", parts=[types.Part.from_text(bash_result)]))
                         await asyncio.sleep(0.5)
 
@@ -270,9 +258,13 @@ class AgentLoop:
                             await self.send_status(f"Waiting for HitL approval for {action_type}...")
                             self.hitl_approved = False
                             self.hitl_approval_event.clear()
+                            action_display = action_param.text or action_param.keys
+                            if action_type == "scroll":
+                                action_display = str(action_param.clicks)
+
                             await self.websocket.send_json({
                                 "type": "hitl_request",
-                                "action": f"{action_type.upper()}: {action_param.text or action_param.keys}",
+                                "action": f"{action_type.upper()}: {action_display}",
                                 "x": 0, "y": 0, "bbox": [0,0,0,0], "is_micro_target": False
                             })
                             await self.hitl_approval_event.wait()
@@ -327,6 +319,18 @@ class AgentLoop:
                             int(bbox[3] / scale_factor)
                         ]
 
+                        dest_px, dest_py = None, None
+                        if action_type == "drag" and action_param.destination:
+                            dest_res = await asyncio.to_thread(call_grounder, action_param.destination)
+                            try:
+                                d_data = json.loads(dest_res.text)
+                                dest_scaled_x = d_data.get("x", 0)
+                                dest_scaled_y = d_data.get("y", 0)
+                                dest_px = int(dest_scaled_x / scale_factor) + monitor["left"]
+                                dest_py = int(dest_scaled_y / scale_factor) + monitor["top"]
+                            except Exception:
+                                pass # fallback will handle
+
                         if hitl_enabled:
                             await self.send_status(f"Waiting for HitL approval for {action_type}...")
                             self.hitl_approved = False
@@ -351,8 +355,10 @@ class AgentLoop:
                                 if action_type == "click":
                                     pyautogui.click()
                                 elif action_type == "drag" and action_param.destination:
-                                    # Fallback simple drag if dest isn't grounded yet
-                                    pyautogui.drag(0, 50, duration=0.5)
+                                    if dest_px is not None and dest_py is not None:
+                                        pyautogui.dragTo(dest_px, dest_py, duration=0.5)
+                                    else:
+                                        pyautogui.drag(0, 50, duration=0.5)
 
                         await asyncio.to_thread(execute_mouse)
                         await asyncio.sleep(1.0)

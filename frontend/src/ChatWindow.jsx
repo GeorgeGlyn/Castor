@@ -44,14 +44,17 @@ function ChatWindow() {
           }
           return newMsgs;
         });
+      } else if (data.type === 'scratchpad_update') {
+        setScratchpad(data.scratchpad);
+        // A new scratchpad update means the planner just finished thinking and parsing its JSON.
+        // We can safely reset the thought accumulator here for the next loop.
+        currentThoughtRef.current = '';
       } else if (data.type === 'hitl_request') {
         setHitlRequest(data);
         currentThoughtRef.current = ''; // Reset thought for next iteration
         if (window.electronAPI) {
             window.electronAPI.showOverlay(data);
         }
-      } else if (data.type === 'scratchpad_update') {
-        setScratchpad(data.scratchpad);
       }
     };
 
