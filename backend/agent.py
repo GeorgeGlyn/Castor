@@ -13,7 +13,24 @@ from pydantic import BaseModel
 
 pyautogui.FAILSAFE = True
 
-# Pydantic model for Grounder structured output
+# Pydantic models for Planner and Grounder structured output
+class Scratchpad(BaseModel):
+    high_level_goal: str
+    current_sub_task: str
+    completed_steps: list[str]
+
+class ActionParams(BaseModel):
+    action: str # "click", "drag", "type", "hotkey", "scroll", "bash", "done"
+    target: Optional[str] = None # For click, drag (start)
+    destination: Optional[str] = None # For drag (end)
+    text: Optional[str] = None # For type, bash
+    keys: Optional[list[str]] = None # For hotkey
+    clicks: Optional[int] = None # For scroll
+
+class PlannerResponse(BaseModel):
+    scratchpad: Scratchpad
+    actions: list[ActionParams]
+
 class GrounderResponse(BaseModel):
     x: int
     y: int
@@ -86,20 +103,28 @@ class AgentLoop:
 
         planner_system_instruction = (
             "You are an expert Desktop AI Planner. "
-            "You will be given a screenshot of the user's desktop and their goal, along with past history. "
-            "You must output a <thought> block detailing your spatial reasoning and visual analysis BEFORE outputting your semantic action. "
-            "End your response with a concise semantic action, e.g., 'Click the Search button' or 'Type \"Hello World\"'. "
-            "If the goal is completed, output 'GOAL COMPLETED'."
+            "You will be given a screenshot of the user's desktop, their goal, and the current scratchpad state. "
+            "You must manage your scratchpad to keep track of long-horizon tasks. "
+            "You must output a <thought> block detailing your spatial reasoning and visual analysis BEFORE outputting your actions array. "
+            "You can output multiple batched actions to execute in sequence. "
+            "Valid actions are: 'click', 'drag', 'type', 'hotkey', 'scroll', 'bash', 'done'. "
+            "For UI clicks/drags, describe the 'target' (and 'destination') semantically (e.g., 'Submit Button'). "
+            "For terminal commands, use the 'bash' action and provide the command in 'text'. "
         )
 
         grounder_system_instruction = (
             "You are an expert Desktop AI Grounder. "
-            "You will receive a screenshot and a semantic action. "
+            "You will receive a screenshot and a semantic target description. "
             "Return the exact x,y coordinates and bounding box [x, y, width, height] of the target element. "
             "If the target element is very small (<15x15 pixels), set is_micro_target to true."
         )
 
         previous_screenshot = None
+        current_scratchpad = Scratchpad(
+            high_level_goal=goal,
+            current_sub_task="Analyze initial state",
+            completed_steps=[]
+        )
 
         while self.is_running:
             try:
@@ -128,6 +153,13 @@ class AgentLoop:
                 request_content = types.Content(role="user", parts=planner_parts)
                 current_history = history + [request_content]
 
+                # Append current scratchpad to the prompt
+                scratchpad_prompt = f"Current Scratchpad:\nGoal: {current_scratchpad.high_level_goal}\nSub-task: {current_scratchpad.current_sub_task}\nCompleted: {current_scratchpad.completed_steps}"
+                planner_parts.insert(0, types.Part.from_text(scratchpad_prompt))
+
+                request_content = types.Content(role="user", parts=planner_parts)
+                current_history = history + [request_content]
+
                 # Streaming from Gemini in thread to not block WS (genai stream is sync)
                 def get_stream():
                     return self.client.models.generate_content_stream(
@@ -143,7 +175,6 @@ class AgentLoop:
 
                 full_response_text = ""
                 # We need to iterate over the generator without blocking the main event loop
-                # The google genai sync generator blocks.
                 def next_chunk(stream):
                     try:
                         return next(stream)
@@ -168,89 +199,163 @@ class AgentLoop:
                 history.append(request_content)
                 history.append(types.Content(role="model", parts=[types.Part.from_text(full_response_text)]))
 
-                if "GOAL COMPLETED" in full_response_text:
-                    await self.send_status("Goal achieved!")
-                    self.is_running = False
-                    break
-
-                # Extract the action
-                semantic_action = full_response_text.split("</thought>")[-1].strip() if "</thought>" in full_response_text else full_response_text.strip()
-
-                await self.send_status(f"Grounding action: {semantic_action}")
-
-                def call_grounder():
-                    return self.client.models.generate_content(
-                        model=self.grounder_model,
-                        contents=[
-                            types.Part.from_text(f"Action to ground: {semantic_action}"),
-                            types.Part.from_image(scaled_img)
-                        ],
-                        config=types.GenerateContentConfig(
-                            system_instruction=grounder_system_instruction,
-                            temperature=0.0,
-                            response_mime_type="application/json",
-                            response_schema=GrounderResponse,
-                        )
-                    )
-
-                grounder_response = await asyncio.to_thread(call_grounder)
-
-                if not self.is_running:
-                    break
-
+                # Extract the JSON payload after </thought>
                 try:
-                    grounding_data = json.loads(grounder_response.text)
+                    json_str = full_response_text.split("</thought>")[-1].strip()
+                    # Clean markdown code blocks if present
+                    if json_str.startswith("```json"):
+                        json_str = json_str[7:-3]
+                    elif json_str.startswith("```"):
+                        json_str = json_str[3:-3]
+                    planner_data = json.loads(json_str)
+                    planner_response = PlannerResponse(**planner_data)
                 except Exception as e:
-                    await self.send_status(f"Failed to parse grounder output: {e}")
+                    await self.send_status(f"Failed to parse planner output: {e}")
+                    history.append(types.Content(role="user", parts=[types.Part.from_text("Invalid JSON format. Please output valid JSON matching the schema after the </thought> block.")]))
                     continue
 
-                scaled_x = grounding_data.get("x", 0)
-                scaled_y = grounding_data.get("y", 0)
-                bbox = grounding_data.get("bbox", [0, 0, 0, 0])
-                is_micro = grounding_data.get("is_micro_target", False)
+                # Update scratchpad
+                current_scratchpad = planner_response.scratchpad
+                await self.websocket.send_json({
+                    "type": "scratchpad_update",
+                    "scratchpad": current_scratchpad.model_dump()
+                })
 
-                # Upscale coordinates and bounding box
-                physical_x = int(scaled_x / scale_factor) + monitor["left"]
-                physical_y = int(scaled_y / scale_factor) + monitor["top"]
-                physical_bbox = [
-                    int(bbox[0] / scale_factor) + monitor["left"],
-                    int(bbox[1] / scale_factor) + monitor["top"],
-                    int(bbox[2] / scale_factor),
-                    int(bbox[3] / scale_factor)
-                ]
-
-                if hitl_enabled:
-                    await self.send_status("Waiting for HitL approval...")
-                    self.hitl_approved = False
-                    self.hitl_approval_event.clear()
-
-                    await self.websocket.send_json({
-                        "type": "hitl_request",
-                        "action": semantic_action,
-                        "x": physical_x,
-                        "y": physical_y,
-                        "bbox": physical_bbox,
-                        "is_micro_target": is_micro
-                    })
-
-                    await self.hitl_approval_event.wait()
-                    if not self.is_running or not self.hitl_approved:
-                        await self.send_status("Action aborted or rejected.")
+                # Process batched actions
+                for action_param in planner_response.actions:
+                    if not self.is_running:
                         break
 
-                await self.send_status("Executing action...")
+                    action_type = action_param.action
+                    await self.send_status(f"Executing: {action_type}")
 
-                def execute_action(px, py, micro):
-                    if micro:
-                        pyautogui.press('tab')
-                    else:
-                        pyautogui.moveTo(px, py, duration=0.2)
-                        pyautogui.click()
+                    if action_type == "done":
+                        await self.send_status("Goal achieved!")
+                        self.is_running = False
+                        break
 
-                await asyncio.to_thread(execute_action, physical_x, physical_y, is_micro)
+                    elif action_type == "bash":
+                        cmd = action_param.text
+                        await self.send_status(f"Running bash: {cmd}")
 
-                # Sleep to allow UI to update
-                await asyncio.sleep(1.0)
+                        if hitl_enabled:
+                            await self.send_status("Waiting for HitL approval for Bash...")
+                            self.hitl_approved = False
+                            self.hitl_approval_event.clear()
+                            await self.websocket.send_json({
+                                "type": "hitl_request",
+                                "action": f"BASH: {cmd}",
+                                "x": 0, "y": 0, "bbox": [0,0,0,0], "is_micro_target": False
+                            })
+                            await self.hitl_approval_event.wait()
+                            if not self.is_running or not self.hitl_approved:
+                                break
+
+                        process = await asyncio.create_subprocess_shell(
+                            cmd,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                            cwd=os.path.join(os.path.dirname(__file__), "..") # run from root
+                        )
+                        stdout, stderr = await process.communicate()
+                        out_str = stdout.decode()
+                        err_str = stderr.decode()
+
+                        bash_result = f"Bash exit {process.returncode}.\nSTDOUT: {out_str}\nSTDERR: {err_str}"
+                        history.append(types.Content(role="user", parts=[types.Part.from_text(bash_result)]))
+                        await asyncio.sleep(0.5)
+
+                    elif action_type in ["type", "hotkey", "scroll"]:
+                        if hitl_enabled:
+                            await self.send_status(f"Waiting for HitL approval for {action_type}...")
+                            self.hitl_approved = False
+                            self.hitl_approval_event.clear()
+                            await self.websocket.send_json({
+                                "type": "hitl_request",
+                                "action": f"{action_type.upper()}: {action_param.text or action_param.keys}",
+                                "x": 0, "y": 0, "bbox": [0,0,0,0], "is_micro_target": False
+                            })
+                            await self.hitl_approval_event.wait()
+                            if not self.is_running or not self.hitl_approved:
+                                break
+
+                        def do_pyautogui():
+                            if action_type == "type" and action_param.text:
+                                pyautogui.write(action_param.text, interval=0.01)
+                            elif action_type == "hotkey" and action_param.keys:
+                                pyautogui.hotkey(*action_param.keys)
+                            elif action_type == "scroll" and action_param.clicks:
+                                pyautogui.scroll(action_param.clicks)
+
+                        await asyncio.to_thread(do_pyautogui)
+                        await asyncio.sleep(0.5)
+
+                    elif action_type in ["click", "drag"]:
+                        # Need grounder for coordinates
+                        def call_grounder(target_desc):
+                            return self.client.models.generate_content(
+                                model=self.grounder_model,
+                                contents=[
+                                    types.Part.from_text(f"Action to ground: {target_desc}"),
+                                    types.Part.from_image(scaled_img)
+                                ],
+                                config=types.GenerateContentConfig(
+                                    system_instruction=grounder_system_instruction,
+                                    temperature=0.0,
+                                    response_mime_type="application/json",
+                                    response_schema=GrounderResponse,
+                                )
+                            )
+
+                        grounder_res = await asyncio.to_thread(call_grounder, action_param.target)
+                        try:
+                            g_data = json.loads(grounder_res.text)
+                        except Exception:
+                            continue
+
+                        scaled_x = g_data.get("x", 0)
+                        scaled_y = g_data.get("y", 0)
+                        bbox = g_data.get("bbox", [0, 0, 0, 0])
+                        is_micro = g_data.get("is_micro_target", False)
+
+                        px = int(scaled_x / scale_factor) + monitor["left"]
+                        py = int(scaled_y / scale_factor) + monitor["top"]
+                        p_bbox = [
+                            int(bbox[0] / scale_factor) + monitor["left"],
+                            int(bbox[1] / scale_factor) + monitor["top"],
+                            int(bbox[2] / scale_factor),
+                            int(bbox[3] / scale_factor)
+                        ]
+
+                        if hitl_enabled:
+                            await self.send_status(f"Waiting for HitL approval for {action_type}...")
+                            self.hitl_approved = False
+                            self.hitl_approval_event.clear()
+                            await self.websocket.send_json({
+                                "type": "hitl_request",
+                                "action": f"{action_type.upper()}: {action_param.target}",
+                                "x": px,
+                                "y": py,
+                                "bbox": p_bbox,
+                                "is_micro_target": is_micro
+                            })
+                            await self.hitl_approval_event.wait()
+                            if not self.is_running or not self.hitl_approved:
+                                break
+
+                        def execute_mouse():
+                            if is_micro:
+                                pyautogui.press('tab')
+                            else:
+                                pyautogui.moveTo(px, py, duration=0.2)
+                                if action_type == "click":
+                                    pyautogui.click()
+                                elif action_type == "drag" and action_param.destination:
+                                    # Fallback simple drag if dest isn't grounded yet
+                                    pyautogui.drag(0, 50, duration=0.5)
+
+                        await asyncio.to_thread(execute_mouse)
+                        await asyncio.sleep(1.0)
 
             except Exception as e:
                 traceback.print_exc()

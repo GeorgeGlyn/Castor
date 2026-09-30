@@ -7,6 +7,7 @@ function ChatWindow() {
   const [hitlRequest, setHitlRequest] = useState(null);
   const [ws, setWs] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [scratchpad, setScratchpad] = useState(null);
 
   const currentThoughtRef = useRef('');
   const messagesEndRef = useRef(null);
@@ -49,6 +50,8 @@ function ChatWindow() {
         if (window.electronAPI) {
             window.electronAPI.showOverlay(data);
         }
+      } else if (data.type === 'scratchpad_update') {
+        setScratchpad(data.scratchpad);
       }
     };
 
@@ -80,6 +83,7 @@ function ChatWindow() {
     if (ws && goal.trim()) {
       currentThoughtRef.current = '';
       setMessages([{ role: 'user', text: goal }]);
+      setScratchpad(null);
       ws.send(JSON.stringify({
         action: 'start_goal',
         goal: goal,
@@ -126,11 +130,24 @@ function ChatWindow() {
         </div>
       </header>
 
+      {scratchpad && (
+        <div className="bg-slate-800 border-b border-slate-700 p-3 shadow-inner">
+          <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Active Scratchpad</div>
+          <div className="text-sm">
+            <p><span className="text-blue-400">Goal:</span> {scratchpad.high_level_goal}</p>
+            <p><span className="text-orange-400">Sub-task:</span> {scratchpad.current_sub_task}</p>
+            {scratchpad.completed_steps && scratchpad.completed_steps.length > 0 && (
+              <p className="mt-1"><span className="text-green-400">Completed:</span> {scratchpad.completed_steps.join(', ')}</p>
+            )}
+          </div>
+        </div>
+      )}
+
       <main className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((msg, i) => (
           <div key={i} className={`p-3 rounded-lg max-w-[90%] ${
             msg.role === 'user' ? 'bg-blue-600 ml-auto' :
-            msg.role === 'system' ? 'bg-slate-700 text-slate-300 italic text-sm text-center mx-auto' :
+            msg.role === 'system' ? 'bg-slate-700 text-slate-300 italic text-sm text-center mx-auto whitespace-pre-wrap' :
             'bg-slate-800 border-l-4 border-purple-500 whitespace-pre-wrap'
           }`}>
             {msg.role === 'planner' && <div className="text-xs text-purple-400 mb-1 font-semibold uppercase tracking-wider">Planner Thought</div>}
@@ -147,7 +164,7 @@ function ChatWindow() {
             Pending Action: <span className="font-bold ml-1 text-white">{hitlRequest.action}</span>
           </p>
           <div className="flex space-x-3">
-            <button onClick={approveAction} className="flex-1 bg-green-600 hover:bg-green-500 text-white py-2 rounded-md font-medium transition-colors">Approve (Click at {hitlRequest.x}, {hitlRequest.y})</button>
+            <button onClick={approveAction} className="flex-1 bg-green-600 hover:bg-green-500 text-white py-2 rounded-md font-medium transition-colors">Approve ({hitlRequest.action})</button>
             <button onClick={rejectAction} className="flex-1 bg-red-600 hover:bg-red-500 text-white py-2 rounded-md font-medium transition-colors">Reject / Abort</button>
           </div>
         </div>
