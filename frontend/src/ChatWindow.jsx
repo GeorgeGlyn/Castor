@@ -1,8 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-// Using electron's ipcRenderer for the killswitch forwarder
-const { ipcRenderer } = window.require ? window.require('electron') : { ipcRenderer: null };
-
 function ChatWindow() {
   const [goal, setGoal] = useState('');
   const [messages, setMessages] = useState([]);
@@ -49,8 +46,8 @@ function ChatWindow() {
       } else if (data.type === 'hitl_request') {
         setHitlRequest(data);
         currentThoughtRef.current = ''; // Reset thought for next iteration
-        if (ipcRenderer) {
-            ipcRenderer.send('show-overlay', data);
+        if (window.electronAPI) {
+            window.electronAPI.showOverlay(data);
         }
       }
     };
@@ -63,15 +60,15 @@ function ChatWindow() {
   };
 
   useEffect(() => {
-    if (ipcRenderer) {
-      ipcRenderer.on('trigger-abort', () => {
+    if (window.electronAPI) {
+      window.electronAPI.triggerAbort(() => {
         if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ action: 'abort' }));
         }
       });
     }
     return () => {
-      if (ipcRenderer) ipcRenderer.removeAllListeners('trigger-abort');
+      if (window.electronAPI) window.electronAPI.removeAllTriggerAbortListeners();
     };
   }, [ws]);
 
@@ -96,7 +93,7 @@ function ChatWindow() {
     if (ws) {
       ws.send(JSON.stringify({ action: 'approve_action' }));
       setHitlRequest(null);
-      if (ipcRenderer) ipcRenderer.send('hide-overlay');
+      if (window.electronAPI) window.electronAPI.hideOverlay();
     }
   };
 
@@ -104,7 +101,7 @@ function ChatWindow() {
     if (ws) {
       ws.send(JSON.stringify({ action: 'reject_action' }));
       setHitlRequest(null);
-      if (ipcRenderer) ipcRenderer.send('hide-overlay');
+      if (window.electronAPI) window.electronAPI.hideOverlay();
     }
   };
 

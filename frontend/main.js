@@ -68,26 +68,26 @@ function killPythonProcess() {
 function createOverlayWindow() {
   const { screen } = require('electron');
   const primaryDisplay = screen.getPrimaryDisplay();
-  const { width, height } = primaryDisplay.bounds;
 
   overlayWindow = new BrowserWindow({
-    x: 0,
-    y: 0,
-    width,
-    height,
     transparent: true,
     frame: false,
     hasShadow: false,
     alwaysOnTop: true,
+    focusable: false,
     skipTaskbar: true,
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js')
     },
   });
 
-  // Make the window click-through
-  overlayWindow.setIgnoreMouseEvents(true);
+  overlayWindow.setBounds(primaryDisplay.bounds);
+
+  // Make the window click-through and keep it completely on top
+  overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+  overlayWindow.setAlwaysOnTop(true, 'screen-saver');
 
   const isDev = process.env.NODE_ENV !== 'production' && !app.isPackaged;
   if (isDev) {
@@ -105,8 +105,9 @@ async function createWindow() {
     width: 450,
     height: 700,
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false, // For simplicity in HitL demo
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js')
     },
   });
 

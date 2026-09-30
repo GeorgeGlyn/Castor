@@ -1,25 +1,31 @@
 import React, { useState, useEffect } from 'react';
 
-const { ipcRenderer } = window.require ? window.require('electron') : { ipcRenderer: null };
-
 function Overlay() {
   const [bboxData, setBboxData] = useState(null);
 
   useEffect(() => {
-    if (ipcRenderer) {
-      ipcRenderer.on('draw-bbox', (event, data) => {
+    if (window.electronAPI) {
+      window.electronAPI.onDrawBbox((data) => {
         setBboxData(data);
       });
     }
 
     return () => {
-      if (ipcRenderer) ipcRenderer.removeAllListeners('draw-bbox');
+      if (window.electronAPI) window.electronAPI.removeAllDrawBboxListeners();
     };
   }, []);
 
   if (!bboxData || !bboxData.bbox) return null;
 
-  const [x, y, width, height] = bboxData.bbox;
+  // Account for High-DPI displays mapping Physical Pixels -> Electron DIPs
+  const dpr = window.devicePixelRatio || 1;
+  const x = bboxData.bbox[0] / dpr;
+  const y = bboxData.bbox[1] / dpr;
+  const width = bboxData.bbox[2] / dpr;
+  const height = bboxData.bbox[3] / dpr;
+
+  const targetX = bboxData.x / dpr;
+  const targetY = bboxData.y / dpr;
   const isMicro = bboxData.is_micro_target;
 
   return (
@@ -43,8 +49,8 @@ function Overlay() {
         <div
           style={{
             position: 'absolute',
-            left: `${bboxData.x - x - 3}px`, // Center the dot
-            top: `${bboxData.y - y - 3}px`,
+            left: `${targetX - x - 3}px`, // Center the dot
+            top: `${targetY - y - 3}px`,
             width: '6px',
             height: '6px',
             backgroundColor: 'yellow',
