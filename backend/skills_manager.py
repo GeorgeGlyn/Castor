@@ -83,14 +83,14 @@ def format_skills_catalog(skills: Dict[str, dict]) -> str:
     for name, data in skills.items():
         desc = data.get("description", "")
         lines.append(f"- {name}: {desc}")
-    lines.append("To consult a skill on-demand, use action 'skill' with 'text' set to the skill name.")
+    lines.append("To consult a skill on-demand and load its instructions into your context, use action 'skill' with 'text' set to the skill name.")
     return "\n".join(lines)
 
 
-def match_skills_for_goal(goal: str, skills: Dict[str, dict]) -> List[Tuple[str, str]]:
+def match_skills_for_goal(goal: str, skills: Dict[str, dict]) -> List[str]:
     """
-    Check if a user goal matches any skill triggers and return relevant skill bodies.
-    Provides automatic Progressive Disclosure on turn 1.
+    Check if a user goal matches any skill triggers and return relevant skill names.
+    Provides automatic suggestions for skills to load.
     """
     matched = []
     goal_lower = goal.lower()
@@ -100,7 +100,7 @@ def match_skills_for_goal(goal: str, skills: Dict[str, dict]) -> List[Tuple[str,
         triggers.append(name.lower())
 
         if any(t in goal_lower for t in triggers):
-            matched.append((name, data["content"]))
+            matched.append(name)
 
     return matched
 
@@ -133,6 +133,7 @@ def synthesize_skill(goal: str, client, model: str = "gemini-flash-lite-latest")
         "name: <slug_name>\n"
         "description: <one-line summary>\n"
         "triggers: [<keywords>]\n"
+        "version: 1.0.0\n"
         "---\n"
         "<Markdown body content>\n"
     )
@@ -167,10 +168,7 @@ def synthesize_skill(goal: str, client, model: str = "gemini-flash-lite-latest")
 
         print(f"[SkillsManager] Successfully synthesized and saved new skill: '{skill_name}' at {skill_file}")
 
-        # Parse and return body
-        parsed = parse_skill_file(skill_file)
-        if parsed:
-            return skill_name, parsed["content"]
+        # Parse and return name
         return skill_name, file_content
 
     except Exception as e:
@@ -184,11 +182,11 @@ async def get_or_create_skills_for_goal(
     client,
     model: str,
     status_callback=None,
-) -> List[Tuple[str, str]]:
+) -> List[str]:
     """
     1. Checks if an existing skill matches the goal.
     2. If not, dynamically synthesizes a brand-new skill, saves it permanently to disk,
-       and returns it for immediate use.
+       and returns its name.
     """
     matched = match_skills_for_goal(goal, available_skills)
     if matched:
@@ -201,9 +199,11 @@ async def get_or_create_skills_for_goal(
     import asyncio
     new_skill = await asyncio.to_thread(synthesize_skill, goal, client, model)
     if new_skill:
-        skill_name, skill_content = new_skill
+        skill_name, _ = new_skill
         if status_callback:
             await status_callback(f"✨ Synthesized and saved new permanent skill: '{skill_name}'!")
-        return [new_skill]
+        # Reload available skills
+        available_skills.update(get_all_skills())
+        return [skill_name]
 
     return []

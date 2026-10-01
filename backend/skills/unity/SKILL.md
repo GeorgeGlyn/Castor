@@ -2,6 +2,7 @@
 name: unity
 description: Automates Unity 3D/2D project creation, headless CLI execution, C# gameplay scripting, procedural scene generation, and Subway Surfers runner games.
 triggers: ["unity", "unity hub", "runner game", "subway surfers", "game project", "c#", "editor script", "game scene"]
+version: 1.0.0
 ---
 
 # Unity Automation Skill

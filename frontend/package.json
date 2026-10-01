@@ -14,7 +14,8 @@
   "type": "module",
   "dependencies": {
     "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "react-dom": "^19.3.0",
+    "react-textarea-autosize": "^8.5.9"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",

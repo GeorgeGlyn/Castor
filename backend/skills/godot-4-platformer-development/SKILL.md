@@ -2,6 +2,7 @@
 name: godot-4-platformer-development
 description: Automated creation, scaffolding, and scripting of 2D platformer games in Godot 4 using headless CLI and GDScript.
 triggers: [godot, godot 4, 2d platformer, game development, gdscript, game engine]
+version: 1.0.0
 ---
 
 # Godot 4 2D Platformer Development Skill
