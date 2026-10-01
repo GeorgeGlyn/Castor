@@ -2,6 +2,7 @@
 name: web-browser
 description: Launches Google Chrome, automates online web search, navigates 3D model repositories (Poly Pizza, Kenney, Sketchfab), downloads character prefabs, audio, and scenery, and imports them directly into game projects.
 triggers: ["browser", "chrome", "google", "web", "search", "research", "online", "download", "prefab", "prefabs", "asset", "assets", "3d model", "model", "character", "player", "kenney", "poly.pizza", "sketchfab"]
+version: 1.0.0
 ---
 
 # Web Browser & Online Asset Acquisition Skill

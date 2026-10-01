@@ -2,6 +2,7 @@
 name: windows-power
 description: Automates Windows window management, focusing apps, running background utilities, and file operations.
 triggers: ["window", "focus", "powershell", "taskbar", "minimize", "maximize", "process"]
+version: 1.0.0
 ---
 
 # Windows Power Skill
