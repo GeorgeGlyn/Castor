@@ -127,6 +127,7 @@ class AgentLoop:
         self.hitl_approval_event = asyncio.Event()
         self.hitl_approved = False
         self.client: genai.Client | None = None  # Created lazily in run()
+        self.loaded_skills = set()
 
         self.api_key = os.getenv("GEMINI_API_KEY")
         # Model names are read fresh inside run() so .env changes take effect after reload
@@ -425,6 +426,13 @@ class AgentLoop:
         rolling_history: list[types.Content] = []
         loaded_skills = set()
 
+        # Broadcast initial skills state to frontend
+        await self.websocket.send_json({
+            "type": "init_state",
+            "available_skills": list(available_skills.keys()),
+            "active_skills": list(self.loaded_skills)
+        })
+
         previous_scaled_img: Image.Image | None = None
         consecutive_diff_failures = 0
         current_scratchpad = Scratchpad(
@@ -660,7 +668,7 @@ class AgentLoop:
                     # ── skill ────────────────────────────────────────────────
                     elif action_type == "skill":
                         skill_name = (action_param.text or action_param.target or "").strip().lower()
-                        if skill_name in loaded_skills:
+                        if skill_name in self.loaded_skills:
                             await self.send_status(f"📖 Skill '{skill_name}' is already loaded.")
                             rolling_history.append(types.Content(
                                 role="user",
@@ -668,7 +676,12 @@ class AgentLoop:
                             ))
                         elif skill_name in available_skills:
                             skill_data = available_skills[skill_name]
-                            loaded_skills.add(skill_name)
+                            self.loaded_skills.add(skill_name)
+                            await self.websocket.send_json({
+                                "type": "init_state",
+                                "available_skills": list(available_skills.keys()),
+                                "active_skills": list(self.loaded_skills)
+                            })
                             await self.send_status(f"📖 Loaded skill reference: '{skill_name}'")
                             rolling_history.append(types.Content(
                                 role="user",

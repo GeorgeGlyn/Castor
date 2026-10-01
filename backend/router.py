@@ -16,6 +16,18 @@ class ConnectionManager:
         agent_loop = AgentLoop(websocket)
         self.active_connections[websocket] = agent_loop
 
+        # Send init state with available skills
+        try:
+            from . import skills_manager
+            available_skills = skills_manager.get_all_skills()
+            await websocket.send_json({
+                "type": "init_state",
+                "available_skills": list(available_skills.keys()),
+                "active_skills": []
+            })
+        except Exception as e:
+            print(f"Error sending init state: {e}")
+
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             agent_loop = self.active_connections[websocket]

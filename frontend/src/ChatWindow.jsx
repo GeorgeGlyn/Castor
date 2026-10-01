@@ -1,4 +1,32 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import TextareaAutosize from 'react-textarea-autosize';
+import Sidebar from './Sidebar';
+
+// ── Components ─────────────────────────────────────────────────────────────
+
+const ThoughtAccordion = ({ text }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  return (
+    <div className="my-2 border border-zinc-800 rounded-lg overflow-hidden bg-zinc-900/50">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium text-zinc-400 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <svg className={`w-3.5 h-3.5 transition-transform ${isOpen ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+          <span>Agent Thought Process</span>
+        </div>
+      </button>
+      {isOpen && (
+        <div className="p-3 text-sm text-zinc-400 border-t border-zinc-800 bg-[#09090b] whitespace-pre-wrap font-mono text-xs">
+          {text}
+        </div>
+      )}
+    </div>
+  );
+};
 
 // Exponential backoff reconnect delay (capped at 30s)
 function getBackoffDelay(attempt) {
@@ -16,6 +44,10 @@ function ChatWindow() {
   const [isConnected, setIsConnected] = useState(false);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const [scratchpad, setScratchpad] = useState(null);
+
+  // Skills state for Sidebar
+  const [availableSkills, setAvailableSkills] = useState([]);
+  const [activeSkills, setActiveSkills] = useState([]);
 
   const wsRef = useRef(null);
   const reconnectAttemptRef = useRef(0);
@@ -40,9 +72,11 @@ function ChatWindow() {
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data);
 
-      if (data.type === 'status') {
+      if (data.type === 'init_state') {
+        setAvailableSkills(data.available_skills || []);
+        setActiveSkills(data.active_skills || []);
+      } else if (data.type === 'status') {
         setMessages(prev => [...prev, { role: 'system', text: data.message }]);
-
       } else if (data.type === 'thought_chunk') {
         currentThoughtRef.current += data.text;
         setMessages(prev => {
@@ -96,7 +130,6 @@ function ChatWindow() {
   }, [connectWebSocket]);
 
   // ── Kill-switch IPC from Electron ──────────────────────────────────────────
-  // Correctly tear down the listener before the next effect run (fixes duplicate listeners)
   useEffect(() => {
     if (!window.electronAPI) return;
 
@@ -110,7 +143,7 @@ function ChatWindow() {
 
     window.electronAPI.triggerAbort(handler);
     return () => window.electronAPI.removeAllTriggerAbortListeners();
-  }, []); // Only register once; uses ref so always has fresh ws
+  }, []);
 
   // ── Auto-scroll ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -159,153 +192,221 @@ function ChatWindow() {
     if (window.electronAPI) window.electronAPI.hideOverlay();
   };
 
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      startGoal();
+    }
+  };
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="flex flex-col h-screen bg-slate-900 text-white font-sans">
+    <div className="flex h-screen bg-[#09090b] text-zinc-200 font-sans selection:bg-blue-500/30 overflow-hidden">
 
-      {/* Header */}
-      <header className="p-4 bg-slate-800 flex justify-between items-center shadow-md border-b border-slate-700">
-        <div className="flex items-center gap-3">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-xs font-bold">C</div>
-          <h1 className="text-lg font-bold tracking-widest text-white">CASTOR <span className="text-blue-400">AI</span></h1>
-        </div>
-        <div className="flex items-center gap-4">
-          {/* Connection indicator */}
-          <div className="flex items-center gap-1.5">
-            <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400 shadow-[0_0_4px_#4ade80]' : 'bg-red-500'}`} />
-            <span className="text-xs text-slate-400">{isConnected ? 'Connected' : 'Offline'}</span>
-          </div>
-          {/* HITL toggle */}
-          <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
-            <div className="relative">
-              <input
-                type="checkbox"
-                checked={hitlEnabled}
-                onChange={(e) => setHitlEnabled(e.target.checked)}
-                className="sr-only"
-              />
-              <div className={`w-9 h-5 rounded-full transition-colors ${hitlEnabled ? 'bg-blue-600' : 'bg-slate-600'}`} />
-              <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${hitlEnabled ? 'translate-x-4' : ''}`} />
-            </div>
-            Confirm Actions
-          </label>
-        </div>
-      </header>
+      {/* Left Sidebar */}
+      <Sidebar
+        isConnected={isConnected}
+        availableSkills={availableSkills}
+        activeSkills={activeSkills}
+      />
 
-      {/* Scratchpad */}
-      {scratchpad && (
-        <div className="bg-slate-800/80 border-b border-slate-700 px-4 py-2.5">
-          <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1">Agent Scratchpad</div>
-          <div className="text-xs space-y-0.5">
-            <p><span className="text-blue-400 font-medium">Goal: </span><span className="text-slate-300">{scratchpad.high_level_goal}</span></p>
-            <p><span className="text-orange-400 font-medium">Now: </span><span className="text-slate-300">{scratchpad.current_sub_task}</span></p>
-            {scratchpad.completed_steps?.length > 0 && (
-              <p><span className="text-green-400 font-medium">Done: </span><span className="text-slate-400">{scratchpad.completed_steps.join(' → ')}</span></p>
-            )}
-          </div>
-        </div>
-      )}
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-w-0 relative">
 
-      {/* Messages */}
-      <main className="flex-1 overflow-y-auto p-4 space-y-3">
-        {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-center text-slate-500">
-            <div className="text-4xl mb-4">🤖</div>
-            <p className="text-sm">Tell Castor what to do on your computer.</p>
-            <p className="text-xs mt-1 text-slate-600">Press Ctrl+Shift+Esc to kill the agent at any time.</p>
-          </div>
-        )}
-        {messages.map((msg, i) => (
-          <div
-            key={i}
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
-            <div className={`rounded-xl px-3 py-2 max-w-[92%] text-sm ${
-              msg.role === 'user'
-                ? 'bg-blue-600 text-white'
-                : msg.role === 'system'
-                ? 'bg-slate-700/60 text-slate-400 italic text-xs text-center w-full rounded-md px-2'
-                : 'bg-slate-800 border-l-2 border-purple-500 text-slate-200 whitespace-pre-wrap'
-            }`}>
-              {msg.role === 'planner' && (
-                <div className="text-[10px] text-purple-400 font-bold uppercase tracking-widest mb-1.5 flex items-center gap-1">
-                  <span>💭</span> Planner Thought
-                </div>
-              )}
-              {msg.text}
-            </div>
-          </div>
-        ))}
-        <div ref={messagesEndRef} />
-      </main>
-
-      {/* HitL approval panel */}
-      {hitlRequest && (
-        <div className="mx-3 mb-2 bg-orange-950/70 border border-orange-700/50 rounded-xl p-3 shadow-xl backdrop-blur-sm">
-          <div className="flex items-start gap-2 mb-3">
-            <span className="text-orange-400 text-lg mt-0.5">⚠️</span>
-            <div>
-              <p className="text-orange-200 text-xs font-semibold uppercase tracking-wider">Action Requires Approval</p>
-              <p className="text-white text-sm font-medium mt-0.5 break-all">{hitlRequest.action}</p>
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={approveAction}
-              className="flex-1 bg-green-700 hover:bg-green-600 active:scale-95 text-white py-2 rounded-lg text-sm font-semibold transition-all"
-            >
-              ✓ Approve
-            </button>
-            <button
-              onClick={rejectAction}
-              className="flex-1 bg-red-800 hover:bg-red-700 active:scale-95 text-white py-2 rounded-lg text-sm font-semibold transition-all"
-            >
-              ✕ Reject & Abort
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Footer input */}
-      <footer className="p-3 bg-slate-800 border-t border-slate-700">
-        {isAgentRunning ? (
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 flex-1 text-sm text-slate-400">
-              <div className="flex gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce [animation-delay:0ms]" />
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce [animation-delay:150ms]" />
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce [animation-delay:300ms]" />
+        {/* Interactive Scratchpad Banner */}
+        {scratchpad && (
+          <div className="absolute top-0 inset-x-0 z-10 bg-[#09090b]/80 backdrop-blur-md border-b border-zinc-800 p-3 shadow-sm">
+            <div className="max-w-3xl mx-auto flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest flex items-center gap-1.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                  Active Goal
+                </span>
+                <span className="text-xs text-zinc-500 font-medium">{scratchpad.completed_steps?.length || 0} steps completed</span>
               </div>
-              Agent is working...
+              <div className="text-sm font-medium text-zinc-200 leading-snug">{scratchpad.high_level_goal}</div>
+              <div className="flex items-start gap-2 mt-1 bg-zinc-900/50 p-2 rounded-md border border-zinc-800/80">
+                <div className="text-orange-400 mt-0.5">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                </div>
+                <div className="text-xs text-zinc-300">
+                  <span className="text-zinc-500 mr-1">Current Task:</span>
+                  {scratchpad.current_sub_task}
+                </div>
+              </div>
             </div>
-            <button
-              onClick={abortGoal}
-              className="bg-red-700 hover:bg-red-600 active:scale-95 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all"
-            >
-              ⛔ Abort
-            </button>
-          </div>
-        ) : (
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={goal}
-              onChange={(e) => setGoal(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && startGoal()}
-              placeholder="What should Castor do on your computer?"
-              disabled={!isConnected}
-              className="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
-            />
-            <button
-              onClick={startGoal}
-              disabled={!isConnected || !goal.trim()}
-              className="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:cursor-not-allowed active:scale-95 text-white px-5 py-2.5 rounded-lg text-sm font-semibold transition-all"
-            >
-              Start
-            </button>
           </div>
         )}
-      </footer>
+
+        {/* Messages Feed */}
+        <main className={`flex-1 overflow-y-auto px-4 pb-32 ${scratchpad ? 'pt-36' : 'pt-8'}`}>
+          <div className="max-w-3xl mx-auto space-y-6">
+            {messages.length === 0 && (
+              <div className="flex flex-col items-center justify-center h-full min-h-[50vh] text-center text-zinc-500">
+                <div className="w-16 h-16 mb-6 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center shadow-lg">
+                  <span className="text-2xl">🪄</span>
+                </div>
+                <h2 className="text-xl font-medium text-zinc-300 mb-2">How can I help you today?</h2>
+                <p className="text-sm text-zinc-500 max-w-sm">
+                  Describe what you want me to do on your desktop. I can browse the web, write code, or control applications.
+                </p>
+                <div className="mt-8 px-3 py-1.5 rounded-full bg-zinc-900 border border-zinc-800 text-xs font-medium text-zinc-500">
+                  Kill Switch: <kbd className="font-mono bg-zinc-800 px-1 py-0.5 rounded text-zinc-400">Ctrl+Shift+Esc</kbd>
+                </div>
+              </div>
+            )}
+
+            {messages.map((msg, i) => {
+              if (msg.role === 'user') {
+                return (
+                  <div key={i} className="flex justify-end">
+                    <div className="bg-zinc-800 text-zinc-200 px-4 py-2.5 rounded-2xl rounded-br-sm max-w-[80%] text-sm shadow-sm border border-zinc-700/50">
+                      {msg.text}
+                    </div>
+                  </div>
+                );
+              }
+
+              if (msg.role === 'system') {
+                return (
+                  <div key={i} className="flex justify-center my-2">
+                    <div className="text-xs text-zinc-500 flex items-center gap-2">
+                      <div className="h-px w-8 bg-zinc-800"></div>
+                      {msg.text}
+                      <div className="h-px w-8 bg-zinc-800"></div>
+                    </div>
+                  </div>
+                );
+              }
+
+              if (msg.role === 'planner') {
+                return (
+                  <div key={i} className="flex justify-start max-w-3xl">
+                    <div className="w-8 h-8 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center mr-3 mt-1 flex-shrink-0 text-xs">
+                      🤖
+                    </div>
+                    <div className="flex-1 overflow-hidden">
+                      <ThoughtAccordion text={msg.text} />
+                    </div>
+                  </div>
+                );
+              }
+
+              return null;
+            })}
+
+            {/* HitL Request Inject */}
+            {hitlRequest && (
+              <div className="flex justify-start max-w-3xl mt-4">
+                <div className="w-8 h-8 rounded-full bg-orange-900/50 border border-orange-800 flex items-center justify-center mr-3 mt-1 flex-shrink-0 text-xs text-orange-400">
+                  !
+                </div>
+                <div className="flex-1 bg-[#18181b] border border-orange-900/50 rounded-xl p-4 shadow-lg">
+                  <h3 className="text-sm font-medium text-orange-400 mb-1">Approval Required</h3>
+                  <p className="text-zinc-300 text-sm mb-4 bg-zinc-900 p-2 rounded border border-zinc-800 font-mono">
+                    {hitlRequest.action}
+                  </p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={approveAction}
+                      className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 py-2 rounded-lg text-sm font-medium transition-colors border border-zinc-700"
+                    >
+                      Approve
+                    </button>
+                    <button
+                      onClick={rejectAction}
+                      className="flex-1 bg-red-900/40 hover:bg-red-900/60 text-red-400 py-2 rounded-lg text-sm font-medium transition-colors border border-red-900/50"
+                    >
+                      Reject & Abort
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div ref={messagesEndRef} className="h-4" />
+          </div>
+        </main>
+
+        {/* Elevated Bottom Input Dock */}
+        <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-[#09090b] via-[#09090b] to-transparent pt-10 pb-6 px-4">
+          <div className="max-w-3xl mx-auto">
+            <div className="bg-[#18181b] border border-zinc-800 rounded-2xl shadow-xl overflow-hidden focus-within:border-zinc-700 focus-within:ring-1 focus-within:ring-zinc-700 transition-all">
+              <TextareaAutosize
+                minRows={1}
+                maxRows={8}
+                value={goal}
+                onChange={(e) => setGoal(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Message Castor..."
+                disabled={!isConnected || isAgentRunning}
+                className="w-full bg-transparent text-zinc-200 px-4 py-3.5 resize-none outline-none text-sm placeholder:text-zinc-500 disabled:opacity-50"
+              />
+
+              <div className="flex items-center justify-between px-3 pb-3 pt-1">
+                {/* Toggles & Actions */}
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-2 cursor-pointer group">
+                    <div className="relative flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={hitlEnabled}
+                        onChange={(e) => setHitlEnabled(e.target.checked)}
+                        className="sr-only"
+                      />
+                      <div className={`w-8 h-4.5 rounded-full transition-colors flex items-center ${hitlEnabled ? 'bg-blue-600' : 'bg-zinc-700'}`}>
+                        <div className={`w-3.5 h-3.5 rounded-full bg-white shadow-sm transform transition-transform ml-0.5 ${hitlEnabled ? 'translate-x-3.5' : ''}`} />
+                      </div>
+                    </div>
+                    <span className="text-xs font-medium text-zinc-400 group-hover:text-zinc-300 transition-colors">
+                      Human in the loop
+                    </span>
+                  </label>
+
+                  {isAgentRunning && (
+                    <button
+                      onClick={abortGoal}
+                      className="flex items-center gap-1.5 text-xs font-medium text-red-400 hover:text-red-300 bg-red-400/10 hover:bg-red-400/20 px-2 py-1 rounded-md transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                      </svg>
+                      Abort
+                    </button>
+                  )}
+                </div>
+
+                {/* Submit Button */}
+                <button
+                  onClick={startGoal}
+                  disabled={!isConnected || !goal.trim() || isAgentRunning}
+                  className="bg-zinc-200 hover:bg-white text-zinc-900 disabled:bg-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed p-1.5 rounded-lg transition-colors flex items-center justify-center"
+                >
+                  {isAgentRunning ? (
+                     <div className="w-5 h-5 flex items-center justify-center gap-0.5">
+                       <span className="w-1 h-1 bg-zinc-500 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                       <span className="w-1 h-1 bg-zinc-500 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                       <span className="w-1 h-1 bg-zinc-500 rounded-full animate-bounce"></span>
+                     </div>
+                  ) : (
+                    <svg className="w-5 h-5 translate-x-[1px] translate-y-[0.5px]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <div className="text-center mt-2">
+              <span className="text-[10px] text-zinc-600">Castor can make mistakes. Consider verifying actions on sensitive systems.</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
     </div>
   );
 }
