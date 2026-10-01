@@ -408,7 +408,7 @@ class AgentLoop:
             types.Content(role="user", parts=[types.Part(text=f"Goal: {goal}")])
         ]
 
-        # Auto-activate skills matching the goal, or dynamically synthesize a new one on the fly
+        # Check for matching skills to advise the planner to load them
         matched_skills = await skills_manager.get_or_create_skills_for_goal(
             goal=goal,
             available_skills=available_skills,
@@ -416,13 +416,14 @@ class AgentLoop:
             model=self.planner_model,
             status_callback=self.send_status,
         )
-        for skill_name, skill_body in matched_skills:
-            await self.send_status(f"⚡ Activated skill: '{skill_name}'")
+        if matched_skills:
+            await self.send_status(f"⚡ Found relevant skills: {', '.join(matched_skills)}")
             base_history.append(types.Content(
                 role="user",
-                parts=[types.Part(text=f"[ACTIVATED SKILL: {skill_name}]\n{skill_body}")],
+                parts=[types.Part(text=f"[SYSTEM ADVISORY: Consider loading these relevant skills: {', '.join(matched_skills)} by using the 'skill' action.]")],
             ))
         rolling_history: list[types.Content] = []
+        loaded_skills = set()
 
         previous_scaled_img: Image.Image | None = None
         consecutive_diff_failures = 0
@@ -659,15 +660,26 @@ class AgentLoop:
                     # ── skill ────────────────────────────────────────────────
                     elif action_type == "skill":
                         skill_name = (action_param.text or action_param.target or "").strip().lower()
-                        if skill_name in available_skills:
+                        if skill_name in loaded_skills:
+                            await self.send_status(f"📖 Skill '{skill_name}' is already loaded.")
+                            rolling_history.append(types.Content(
+                                role="user",
+                                parts=[types.Part(text=f"[System]: Skill '{skill_name}' is already loaded in your context.")],
+                            ))
+                        elif skill_name in available_skills:
                             skill_data = available_skills[skill_name]
+                            loaded_skills.add(skill_name)
                             await self.send_status(f"📖 Loaded skill reference: '{skill_name}'")
                             rolling_history.append(types.Content(
                                 role="user",
-                                parts=[types.Part(text=f"[SKILL REFERENCE: {skill_name}]\n{skill_data['content']}")],
+                                parts=[types.Part(text=f"[System]: Skill '{skill_name}' loaded successfully. Follow these instructions:\n\n{skill_data['content']}")],
                             ))
                         else:
-                            await self.send_status(f"⚠️ Skill '{skill_name}' not found. Available: {list(available_skills.keys())}")
+                            await self.send_status(f"⚠️ Skill '{skill_name}' not found.")
+                            rolling_history.append(types.Content(
+                                role="user",
+                                parts=[types.Part(text=f"[System]: Skill '{skill_name}' not found. Available skills: {', '.join(available_skills.keys())}")],
+                            ))
 
                     # ── type ─────────────────────────────────────────────────
                     elif action_type == "type":
