@@ -424,6 +424,7 @@ class AgentLoop:
                 parts=[types.Part(text=f"[SYSTEM ADVISORY: Consider loading these relevant skills: {', '.join(matched_skills)} by using the 'skill' action.]")],
             ))
         rolling_history: list[types.Content] = []
+        loaded_skills = set()
 
         # Broadcast initial skills state to frontend
         await self.websocket.send_json({
