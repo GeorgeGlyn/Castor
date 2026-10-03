@@ -1,4 +1,4 @@
-const { app, BrowserWindow, globalShortcut, systemPreferences, ipcMain } = require('electron');
+const { app, BrowserWindow, globalShortcut, systemPreferences, ipcMain, dialog } = require('electron');
 const path = require('path');
 const { spawn, execSync } = require('child_process');
 const http = require('http');
@@ -91,6 +91,7 @@ function createOverlayWindow() {
 
   overlayWindow = new BrowserWindow({
     transparent: true,
+    backgroundColor: '#00000000',
     frame: false,
     hasShadow: false,
     alwaysOnTop: true,
@@ -99,15 +100,15 @@ function createOverlayWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.cjs')  // Updated to .cjs
+      preload: path.join(__dirname, 'preload.cjs')
     },
   });
 
   overlayWindow.setBounds(primaryDisplay.bounds);
 
-  // Make the window click-through and keep it completely on top
+  // Make the window click-through and keep it floating above apps safely without hijacking screen-saver level
   overlayWindow.setIgnoreMouseEvents(true, { forward: true });
-  overlayWindow.setAlwaysOnTop(true, 'screen-saver');
+  overlayWindow.setAlwaysOnTop(true, 'floating');
 
   const isDev = process.env.NODE_ENV !== 'production' && !app.isPackaged;
   if (isDev) {
@@ -173,9 +174,24 @@ app.whenReady().then(async () => {
 
   // Setup IPC for overlay
   ipcMain.on('show-overlay', (event, data) => {
-    if (overlayWindow) {
+    // Only show overlay if there is a concrete GUI target or bounding box to highlight
+    const hasVisualTarget = data && (
+      (data.bbox && (data.bbox[2] > 0 || data.bbox[3] > 0)) ||
+      (data.x > 0 || data.y > 0)
+    );
+
+    if (overlayWindow && hasVisualTarget) {
       overlayWindow.webContents.send('draw-bbox', data);
-      overlayWindow.showInactive(); // Show without taking focus
+      overlayWindow.showInactive();
+    } else if (overlayWindow) {
+      overlayWindow.hide();
+    }
+
+    // Bring Castor window to the foreground so the user clearly sees the approval prompt
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+      mainWindow.setAlwaysOnTop(true);
+      mainWindow.setAlwaysOnTop(false);
     }
   });
 
@@ -189,6 +205,17 @@ app.whenReady().then(async () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.minimize();
     }
+  });
+
+  ipcMain.handle('select-folder', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openDirectory', 'createDirectory'],
+      title: 'Select Project Directory'
+    });
+    if (!result.canceled && result.filePaths && result.filePaths.length > 0) {
+      return result.filePaths[0];
+    }
+    return null;
   });
 
   // Register Global Hotkey (Cmd/Ctrl + Shift + Esc)

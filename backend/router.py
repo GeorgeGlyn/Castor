@@ -1,10 +1,86 @@
 import os
+import re
 import asyncio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from typing import Dict
-from .agent import AgentLoop
+from typing import Dict, Optional
+from pydantic import BaseModel
+try:
+    from .agent import AgentLoop
+    from .artifacts_manager import artifacts_manager
+except ImportError:
+    from agent import AgentLoop
+    from artifacts_manager import artifacts_manager
 
 router = APIRouter()
+
+DEFAULT_PROJECTS_DIR = os.getenv(
+    "CASTOR_PROJECTS_DIR",
+    "D:\\CastorProjects" if os.path.exists("D:\\") else os.path.expanduser("~/CastorProjects")
+)
+
+def ensure_projects_dir(path: str = DEFAULT_PROJECTS_DIR):
+    try:
+        os.makedirs(path, exist_ok=True)
+    except Exception as e:
+        print(f"Warning: Could not create projects directory {path}: {e}")
+
+ensure_projects_dir()
+
+class CreateProjectRequest(BaseModel):
+    name: str
+    base_dir: Optional[str] = None
+
+@router.get("/api/projects")
+async def list_projects(base_dir: Optional[str] = None):
+    target_dir = base_dir or DEFAULT_PROJECTS_DIR
+    ensure_projects_dir(target_dir)
+
+    projects = []
+    if os.path.exists(target_dir):
+        try:
+            for entry in os.scandir(target_dir):
+                if entry.is_dir() and not entry.name.startswith("."):
+                    projects.append({
+                        "name": entry.name,
+                        "path": os.path.abspath(entry.path),
+                        "last_modified": entry.stat().st_mtime
+                    })
+        except Exception as e:
+            print(f"Error scanning projects dir {target_dir}: {e}")
+
+    # Sort most recently modified first
+    projects.sort(key=lambda p: p.get("last_modified", 0), reverse=True)
+    return {"projects": projects, "base_dir": os.path.abspath(target_dir)}
+
+@router.post("/api/projects")
+async def create_project(req: CreateProjectRequest):
+    # Sanitize project name
+    clean_name = re.sub(r'[\\/*?:"<>|]', "", req.name.strip())
+    if not clean_name:
+        clean_name = f"Project_{int(asyncio.get_event_loop().time())}"
+
+    base = req.base_dir or DEFAULT_PROJECTS_DIR
+    ensure_projects_dir(base)
+    project_path = os.path.join(base, clean_name)
+    os.makedirs(project_path, exist_ok=True)
+
+    return {
+        "success": True,
+        "name": clean_name,
+        "path": os.path.abspath(project_path)
+    }
+
+@router.get("/api/artifacts")
+async def list_project_artifacts(project_path: Optional[str] = None):
+    items = artifacts_manager.list_artifacts(project_path)
+    return {"artifacts": items}
+
+@router.get("/api/artifacts/{artifact_id}")
+async def get_project_artifact(artifact_id: str, project_path: Optional[str] = None):
+    art = artifacts_manager.get_artifact(artifact_id, project_path)
+    if not art:
+        return {"error": f"Artifact '{artifact_id}' not found", "found": False}
+    return {"artifact": art.model_dump(), "found": True}
 
 class ConnectionManager:
     def __init__(self):
@@ -16,14 +92,15 @@ class ConnectionManager:
         agent_loop = AgentLoop(websocket)
         self.active_connections[websocket] = agent_loop
 
-        # Send init state with available skills
+        # Send init state with available skills and projects
         try:
             from . import skills_manager
             available_skills = skills_manager.get_all_skills()
             await websocket.send_json({
                 "type": "init_state",
                 "available_skills": list(available_skills.keys()),
-                "active_skills": []
+                "active_skills": [],
+                "default_projects_dir": os.path.abspath(DEFAULT_PROJECTS_DIR)
             })
         except Exception as e:
             print(f"Error sending init state: {e}")
@@ -52,9 +129,19 @@ async def websocket_endpoint(websocket: WebSocket):
             if action == "start_goal":
                 goal = data.get("goal")
                 hitl_enabled = data.get("hitl_enabled", False)
+                project_path = data.get("project_path")
+                history = data.get("history", [])
                 if goal:
-                    # Start the agent loop in an async task so we don't block the receiver
-                    asyncio.create_task(agent_loop.run(goal, hitl_enabled))
+                    async def run_safe():
+                        try:
+                            await agent_loop.run(goal, hitl_enabled, project_path=project_path, history=history)
+                        except Exception as e:
+                            import traceback
+                            traceback.print_exc()
+                            await manager.send_message({"type": "status", "message": f"❌ Agent error: {e}"}, websocket)
+                            await manager.send_message({"type": "goal_complete"}, websocket)
+
+                    asyncio.create_task(run_safe())
 
             elif action == "abort":
                 agent_loop.stop()
@@ -67,6 +154,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 agent_loop.set_hitl_approval(False)
                 await manager.send_message({"type": "status", "message": "Action rejected by user. Aborting loop."}, websocket)
                 agent_loop.stop()
+
+            elif action == "answer_question":
+                answers = data.get("answers", [])
+                agent_loop.provide_question_answers(answers)
+
+            elif action == "skip_question":
+                agent_loop.provide_question_answers([{"skipped": True}])
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)

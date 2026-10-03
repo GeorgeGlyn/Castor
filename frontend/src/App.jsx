@@ -3,7 +3,7 @@ import ChatWindow from './ChatWindow'
 
 function App() {
   return (
-    <div className="App">
+    <div className="w-full h-full bg-[#09090b]">
       <ChatWindow />
     </div>
   )

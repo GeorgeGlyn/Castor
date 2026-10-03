@@ -3,3 +3,13 @@ node_modules/
 backend/.venv/
 backend/__pycache__/
 backend/.env
+# Scratch experiments
+backend/*.cs
+backend/build_pro_skater.py
+backend/check_status.py
+backend/execute_charmorph_pipeline.py
+backend/patch_player.py
+backend/render_runner.py
+backend/test_skater_rig.py
+backend/update_builder.py
+backend/write_skater_script.py

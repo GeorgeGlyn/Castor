@@ -1,22 +1,23 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" style="background: transparent !important; background-color: transparent !important;">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Castor Overlay</title>
     <style>
-      body, html {
+      html, body, #root {
         margin: 0;
         padding: 0;
         width: 100vw;
         height: 100vh;
-        background: transparent;
+        background: transparent !important;
+        background-color: transparent !important;
         overflow: hidden;
       }
     </style>
   </head>
-  <body>
-    <div id="root"></div>
+  <body style="background: transparent !important; background-color: transparent !important;">
+    <div id="root" style="background: transparent !important; background-color: transparent !important;"></div>
     <script type="module" src="/src/overlay-main.jsx"></script>
   </body>
 </html>

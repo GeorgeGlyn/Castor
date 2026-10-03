@@ -13,4 +13,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Window control
   minimizeMainWindow: () => ipcRenderer.send('minimize-main-window'),
+  selectFolder: () => ipcRenderer.invoke('select-folder'),
 });

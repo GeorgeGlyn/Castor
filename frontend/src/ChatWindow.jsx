@@ -5,25 +5,236 @@ import Sidebar from './Sidebar';
 // ── Components ─────────────────────────────────────────────────────────────
 
 const ThoughtAccordion = ({ text }) => {
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(true);
+  const displayText = (text || '').trim();
+  if (!displayText) return null;
   return (
-    <div className="my-2 border border-zinc-800 rounded-lg overflow-hidden bg-zinc-900/50">
+    <div className="my-2 border border-zinc-800 rounded-xl overflow-hidden bg-zinc-900/60 shadow-sm">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium text-zinc-400 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+        className="w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-medium text-zinc-300 hover:text-white hover:bg-zinc-800/60 transition-colors"
       >
         <div className="flex items-center gap-2">
-          <svg className={`w-3.5 h-3.5 transition-transform ${isOpen ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg className={`w-3.5 h-3.5 text-blue-400 transition-transform ${isOpen ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
-          <span>Agent Thought Process</span>
+          <span className="font-semibold text-blue-400">Agent Thought Process</span>
         </div>
+        <span className="text-[11px] text-zinc-500 font-mono hover:text-zinc-400">{isOpen ? 'Hide' : 'Show'}</span>
       </button>
       {isOpen && (
-        <div className="p-3 text-sm text-zinc-400 border-t border-zinc-800 bg-[#09090b] whitespace-pre-wrap font-mono text-xs">
-          {text}
+        <div className="p-3.5 text-xs text-zinc-300 border-t border-zinc-800 bg-[#09090b] whitespace-pre-wrap font-mono leading-relaxed select-text">
+          {displayText}
         </div>
       )}
+    </div>
+  );
+};
+
+// ── Slash Commands Definitions ─────────────────────────────────────────────
+const SLASH_COMMANDS = [
+  {
+    command: '/plan',
+    title: 'Plan Architecture',
+    desc: 'Formulates an in-depth architecture document & roadmap artifact before coding.',
+    badge: 'Artifact',
+  },
+  {
+    command: '/goal',
+    title: 'Autonomous Goal',
+    desc: 'Runs in persistent thorough mode with extended budget until 100% verified.',
+    badge: 'Persistence',
+  },
+  {
+    command: '/grill-me',
+    title: 'Interview & Align',
+    desc: 'Conducts an interactive interview with questions to clarify design choices.',
+    badge: 'Interactive',
+  },
+  {
+    command: '/learn',
+    title: 'Teach Castor',
+    desc: 'Saves an architectural insight, coding pattern, or gotcha into persistent memory.',
+    badge: 'Knowledge',
+  },
+  {
+    command: '/schedule',
+    title: 'Schedule / Timer',
+    desc: 'Schedule a recurring cron job or one-shot notification timer.',
+    badge: 'Timer',
+  },
+];
+
+// ── Visual Code Diff Viewer (Antigravity Parity) ───────────────────────────
+const DiffViewer = ({ diffData }) => {
+  const [isExpanded, setIsExpanded] = useState(true);
+  const [copied, setCopied] = useState(false);
+  if (!diffData || !diffData.diff) return null;
+
+  const lines = (diffData.diff || '').split('\n');
+  const fileName = (diffData.file_path || '').split(/[\\/]/).pop() || diffData.file_path;
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(diffData.diff);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="my-2 border border-zinc-800 rounded-xl overflow-hidden bg-[#0e0e11] shadow-lg max-w-full">
+      <div className="flex items-center justify-between px-3.5 py-2 bg-zinc-900/80 border-b border-zinc-800 text-xs select-none">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-blue-400 font-mono text-[10px] font-bold bg-blue-950/60 px-1.5 py-0.5 rounded border border-blue-800/40">
+            DIFF
+          </span>
+          <span className="font-mono text-zinc-200 font-medium truncate max-w-[240px] sm:max-w-md" title={diffData.file_path}>
+            {fileName}
+          </span>
+          <div className="flex items-center gap-1.5 text-[10px] font-mono">
+            {diffData.additions > 0 && (
+              <span className="text-emerald-400 bg-emerald-950/40 px-1 rounded">+{diffData.additions}</span>
+            )}
+            {diffData.deletions > 0 && (
+              <span className="text-red-400 bg-red-950/40 px-1 rounded">-{diffData.deletions}</span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={handleCopy}
+            className="text-[10px] text-zinc-400 hover:text-zinc-200 bg-zinc-800 hover:bg-zinc-750 px-2 py-0.5 rounded transition-colors"
+          >
+            {copied ? '✓ Copied' : 'Copy'}
+          </button>
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="text-[10px] text-zinc-400 hover:text-zinc-200"
+          >
+            {isExpanded ? 'Collapse' : 'Expand'}
+          </button>
+        </div>
+      </div>
+
+      {isExpanded && (
+        <div className="max-h-72 overflow-y-auto p-2.5 font-mono text-xs leading-relaxed select-text bg-[#09090b]">
+          {lines.map((line, idx) => {
+            const isAdd = line.startsWith('+') && !line.startsWith('+++');
+            const isDel = line.startsWith('-') && !line.startsWith('---');
+            const isHeader = line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++');
+
+            return (
+              <div
+                key={idx}
+                className={`flex gap-3 px-2 py-0.5 rounded ${
+                  isAdd
+                    ? 'bg-emerald-950/40 text-emerald-300'
+                    : isDel
+                    ? 'bg-red-950/40 text-red-300'
+                    : isHeader
+                    ? 'text-cyan-400/80 bg-zinc-900/60 font-semibold'
+                    : 'text-zinc-400'
+                }`}
+              >
+                <span className="w-6 text-right select-none text-zinc-600 text-[10px]">{idx + 1}</span>
+                <span className="flex-1 whitespace-pre-wrap break-all">{line}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── Artifacts Sidecar Drawer (Antigravity Parity) ──────────────────────────
+const ArtifactsDrawer = ({ isOpen, onClose, artifacts, activeArtifact, onSelectArtifact }) => {
+  const [copied, setCopied] = useState(false);
+  if (!isOpen) return null;
+
+  const current = activeArtifact || artifacts[0] || null;
+
+  const handleCopy = () => {
+    if (current?.content) {
+      navigator.clipboard.writeText(current.content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  return (
+    <div className="fixed inset-y-0 right-0 w-full sm:w-[480px] lg:w-[560px] bg-[#0d0d10] border-l border-zinc-800 shadow-2xl z-40 flex flex-col animate-in slide-in-from-right duration-200">
+      {/* Drawer Header */}
+      <div className="h-12 px-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/80">
+        <div className="flex items-center gap-2">
+          <span className="text-sm">📄</span>
+          <h2 className="text-sm font-semibold text-zinc-100">Living Artifacts & Specs</h2>
+          <span className="text-[10px] font-mono bg-zinc-800 text-zinc-400 px-1.5 py-0.5 rounded-full">
+            {artifacts.length}
+          </span>
+        </div>
+        <button
+          onClick={onClose}
+          className="text-zinc-400 hover:text-zinc-200 p-1.5 rounded-lg hover:bg-zinc-800 transition-colors"
+        >
+          ✕
+        </button>
+      </div>
+
+      {/* Artifacts Tabs */}
+      {artifacts.length > 0 && (
+        <div className="flex items-center gap-1.5 px-3 py-2 border-b border-zinc-800/80 overflow-x-auto bg-zinc-950/60 scrollbar-none">
+          {artifacts.map((art) => {
+            const isSel = current?.id === art.id;
+            return (
+              <button
+                key={art.id}
+                onClick={() => onSelectArtifact(art)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+                  isSel
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
+                }`}
+              >
+                <span>{art.type === 'diagram' ? '📊' : art.type === 'code' ? '💻' : '📝'}</span>
+                <span className="truncate max-w-[140px]">{art.title}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Content Body */}
+      <div className="flex-1 overflow-y-auto p-4 select-text">
+        {current ? (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-zinc-800/80">
+              <div>
+                <h3 className="text-sm font-semibold text-zinc-100">{current.title}</h3>
+                <p className="text-[10px] font-mono text-zinc-500 mt-0.5">{current.file_path || current.path}</p>
+              </div>
+              <button
+                onClick={handleCopy}
+                className="text-xs bg-zinc-800 hover:bg-zinc-750 text-zinc-300 hover:text-white px-2.5 py-1 rounded-md transition-colors border border-zinc-700/60"
+              >
+                {copied ? '✓ Copied' : 'Copy'}
+              </button>
+            </div>
+
+            <div className="bg-[#09090b] border border-zinc-800/80 rounded-xl p-4 font-mono text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap">
+              {current.content}
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full text-center text-zinc-500">
+            <div className="text-3xl mb-2">📑</div>
+            <p className="text-sm font-medium text-zinc-400">No artifacts generated yet</p>
+            <p className="text-xs text-zinc-600 max-w-xs mt-1">
+              Ask Castor to plan an architecture with <code className="text-blue-400 font-mono">/plan</code> or create specs to see living documents here.
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
@@ -38,22 +249,317 @@ function getBackoffDelay(attempt) {
 
 function ChatWindow() {
   const [goal, setGoal] = useState('');
-  const [messages, setMessages] = useState([]);
   const [hitlEnabled, setHitlEnabled] = useState(false);
   const [hitlRequest, setHitlRequest] = useState(null);
+  const [questionModal, setQuestionModal] = useState(null);
+  const [selectedAnswers, setSelectedAnswers] = useState({});
+  const [customWriteIns, setCustomWriteIns] = useState({});
   const [isConnected, setIsConnected] = useState(false);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
-  const [scratchpad, setScratchpad] = useState(null);
+  const [agentStatus, setAgentStatus] = useState('');
+  const [isThinking, setIsThinking] = useState(false);
+  const [thinkingSeconds, setThinkingSeconds] = useState(0);
+
+  // ── Antigravity Parity: Living Artifacts & Sidecar State ───────────────────
+  const [artifacts, setArtifacts] = useState([]);
+  const [activeArtifact, setActiveArtifact] = useState(null);
+  const [isArtifactsOpen, setIsArtifactsOpen] = useState(false);
+
+  // ── Antigravity Parity: Slash Commands Autocomplete State ───────────────────
+  const [showSlashMenu, setShowSlashMenu] = useState(false);
+  const [slashSelectedIdx, setSlashSelectedIdx] = useState(0);
+
+  // ── Projects State ────────────────────────────────────────────────────────
+  const [projects, setProjects] = useState([]);
+  const [activeProject, setActiveProject] = useState(() => {
+    try {
+      const saved = localStorage.getItem('castor_active_project');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [autoCreateProject, setAutoCreateProject] = useState(() => {
+    try {
+      const saved = localStorage.getItem('castor_auto_create_project');
+      return saved === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  // ── Chats State ───────────────────────────────────────────────────────────
+  const [chats, setChats] = useState(() => {
+    try {
+      const saved = localStorage.getItem('castor_chats');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    const initialId = 'chat_' + Date.now();
+    return [{
+      id: initialId,
+      title: 'New Chat',
+      project: null,
+      messages: [],
+      scratchpad: null,
+      createdAt: Date.now()
+    }];
+  });
+
+  const [activeChatId, setActiveChatId] = useState(() => {
+    const saved = localStorage.getItem('castor_active_chat_id');
+    return saved || null;
+  });
 
   // Skills state for Sidebar
   const [availableSkills, setAvailableSkills] = useState([]);
   const [activeSkills, setActiveSkills] = useState([]);
+  const [isTasksExpanded, setIsTasksExpanded] = useState(true);
 
   const wsRef = useRef(null);
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef(null);
   const currentThoughtRef = useRef('');
   const messagesEndRef = useRef(null);
+
+  // Active chat getter
+  const activeChat = chats.find(c => c.id === activeChatId) || chats[0];
+  const messages = activeChat?.messages || [];
+  const scratchpad = activeChat?.scratchpad || null;
+
+  // Persist chats to localStorage whenever updated
+  useEffect(() => {
+    try {
+      localStorage.setItem('castor_chats', JSON.stringify(chats));
+    } catch (e) {
+      console.error('Failed to save chats', e);
+    }
+  }, [chats]);
+
+  // Persist activeChatId
+  useEffect(() => {
+    if (activeChatId) {
+      localStorage.setItem('castor_active_chat_id', activeChatId);
+    }
+  }, [activeChatId]);
+
+  // Live timer for thinking / running state
+  useEffect(() => {
+    let interval = null;
+    if (isAgentRunning) {
+      interval = setInterval(() => {
+        setThinkingSeconds((s) => s + 1);
+      }, 1000);
+    } else {
+      setThinkingSeconds(0);
+      setIsThinking(false);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isAgentRunning]);
+
+  // Ensure activeChatId is valid
+  useEffect(() => {
+    if (!activeChatId && chats.length > 0) {
+      setActiveChatId(chats[0].id);
+      if (chats[0].project) {
+        setActiveProject(chats[0].project);
+      }
+    }
+  }, [chats, activeChatId]);
+
+  // Sync active project with active chat's project
+  useEffect(() => {
+    if (activeChat?.project) {
+      setActiveProject(activeChat.project);
+    }
+  }, [activeChatId]);
+
+  // ── Fetch Projects API ───────────────────────────────────────────────────
+  const fetchProjects = useCallback(async () => {
+    try {
+      const res = await fetch('http://localhost:8000/api/projects');
+      if (res.ok) {
+        const data = await res.json();
+        const list = data.projects || [];
+        setProjects(list);
+
+        // If no active project, set default (RunnerGame or first)
+        setActiveProject((current) => {
+          if (!current && list.length > 0) {
+            const runner = list.find((p) => p.name.toLowerCase() === 'runnergame');
+            const chosen = runner || list[0];
+            localStorage.setItem('castor_active_project', JSON.stringify(chosen));
+            return chosen;
+          }
+          return current;
+        });
+      }
+    } catch (err) {
+      console.error('Error fetching projects:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchProjects();
+  }, [fetchProjects]);
+
+  // ── Fetch Artifacts API ───────────────────────────────────────────────────
+  const fetchArtifacts = useCallback(async (projPath) => {
+    try {
+      const url = projPath
+        ? `http://localhost:8000/api/artifacts?project_path=${encodeURIComponent(projPath)}`
+        : 'http://localhost:8000/api/artifacts';
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        const list = data.artifacts || [];
+        setArtifacts(list);
+        if (list.length > 0 && !activeArtifact) {
+          setActiveArtifact(list[0]);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching artifacts:', err);
+    }
+  }, [activeArtifact]);
+
+  useEffect(() => {
+    fetchArtifacts(activeProject?.path);
+  }, [activeProject, fetchArtifacts]);
+
+  // Toggle Auto-Create setting
+  const handleToggleAutoCreate = (val) => {
+    setAutoCreateProject(val);
+    localStorage.setItem('castor_auto_create_project', val ? 'true' : 'false');
+  };
+
+  // Helper to update active chat fields safely preserving all properties
+  const updateActiveChat = useCallback((updater) => {
+    setChats((prev) =>
+      prev.map((c) => {
+        if (c.id === (activeChatId || prev[0]?.id)) {
+          const res = typeof updater === 'function' ? updater(c) : updater;
+          return { ...c, ...res };
+        }
+        return c;
+      })
+    );
+  }, [activeChatId]);
+
+  // ── Project Actions ──────────────────────────────────────────────────────
+  const handleSelectProject = (proj) => {
+    setActiveProject(proj);
+    localStorage.setItem('castor_active_project', JSON.stringify(proj));
+    updateActiveChat({ project: proj });
+  };
+
+  const handleCreateProject = async (name) => {
+    try {
+      const res = await fetch('http://localhost:8000/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (res.ok) {
+        const newProj = await res.json();
+        await fetchProjects();
+        const projObj = { name: newProj.name, path: newProj.path };
+        handleSelectProject(projObj);
+        return projObj;
+      }
+    } catch (e) {
+      console.error('Failed to create project:', e);
+    }
+    return null;
+  };
+
+  const handleBrowseProject = async () => {
+    if (window.electronAPI && window.electronAPI.selectFolder) {
+      try {
+        const folderPath = await window.electronAPI.selectFolder();
+        if (folderPath) {
+          const name = folderPath.split(/[\\/]/).filter(Boolean).pop() || 'Project';
+          const projObj = { name, path: folderPath };
+          handleSelectProject(projObj);
+          // Prepend to projects list in UI
+          setProjects((prev) => [projObj, ...prev.filter((p) => p.path !== folderPath)]);
+        }
+      } catch (err) {
+        console.error('Failed to browse folder:', err);
+      }
+    }
+  };
+
+  // ── Chat Actions ─────────────────────────────────────────────────────────
+  const handleNewChat = async () => {
+    let boundProject = activeProject;
+
+    // If auto-create is enabled, create a dedicated project for this new chat
+    if (autoCreateProject) {
+      const d = new Date();
+      const dateStr = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+      const randStr = Math.floor(100 + Math.random() * 900);
+      const autoName = `Project_${dateStr}_${randStr}`;
+      const created = await handleCreateProject(autoName);
+      if (created) {
+        boundProject = created;
+      }
+    }
+
+    const newId = 'chat_' + Date.now();
+    const newChat = {
+      id: newId,
+      title: 'New Chat',
+      project: boundProject,
+      messages: [],
+      scratchpad: null,
+      createdAt: Date.now(),
+    };
+
+    setChats((prev) => [newChat, ...prev]);
+    setActiveChatId(newId);
+    if (boundProject) {
+      setActiveProject(boundProject);
+    }
+    setGoal('');
+    setHitlRequest(null);
+  };
+
+  const handleSelectChat = (id) => {
+    setActiveChatId(id);
+    const target = chats.find((c) => c.id === id);
+    if (target?.project) {
+      setActiveProject(target.project);
+    }
+  };
+
+  const handleDeleteChat = (id) => {
+    setChats((prev) => {
+      const filtered = prev.filter((c) => c.id !== id);
+      if (filtered.length === 0) {
+        const fallbackId = 'chat_' + Date.now();
+        const fallbackChat = {
+          id: fallbackId,
+          title: 'New Chat',
+          project: activeProject,
+          messages: [],
+          scratchpad: null,
+          createdAt: Date.now(),
+        };
+        setActiveChatId(fallbackId);
+        return [fallbackChat];
+      }
+      if (activeChatId === id) {
+        setActiveChatId(filtered[0].id);
+      }
+      return filtered;
+    });
+  };
 
   // ── WebSocket connection ────────────────────────────────────────────────────
   const connectWebSocket = useCallback(() => {
@@ -76,40 +582,132 @@ function ChatWindow() {
         setAvailableSkills(data.available_skills || []);
         setActiveSkills(data.active_skills || []);
       } else if (data.type === 'status') {
-        setMessages(prev => [...prev, { role: 'system', text: data.message }]);
+        setAgentStatus(data.message);
+        const msgText = data.message || '';
+        if (
+          msgText.includes('Planning') ||
+          msgText.includes('Consulting') ||
+          msgText.includes('Analyzing') ||
+          msgText.includes('Capturing') ||
+          msgText.includes('Initializing') ||
+          msgText.includes('Starting') ||
+          msgText.includes('Checking')
+        ) {
+          setIsThinking(true);
+        } else if (
+          msgText.includes('Executing') ||
+          msgText.includes('Running') ||
+          msgText.includes('Clicked') ||
+          msgText.includes('Typed') ||
+          msgText.includes('Pressed') ||
+          msgText.includes('Goal achieved') ||
+          msgText.includes('Output:')
+        ) {
+          setIsThinking(false);
+        }
+        updateActiveChat((chat) => ({
+          messages: [...(chat.messages || []), { role: 'system', text: data.message }],
+        }));
       } else if (data.type === 'thought_chunk') {
         currentThoughtRef.current += data.text;
-        setMessages(prev => {
-          const newMsgs = [...prev];
-          const last = newMsgs[newMsgs.length - 1];
+        setIsThinking(false);
+        setAgentStatus('Planning complete. Preparing actions...');
+        updateActiveChat((chat) => {
+          const msgs = [...(chat.messages || [])];
+          const last = msgs[msgs.length - 1];
           if (last && last.role === 'planner') {
-            return [...newMsgs.slice(0, -1), { role: 'planner', text: currentThoughtRef.current }];
+            return {
+              messages: [...msgs.slice(0, -1), { role: 'planner', text: currentThoughtRef.current }],
+            };
           }
-          return [...newMsgs, { role: 'planner', text: currentThoughtRef.current }];
+          return {
+            messages: [...msgs, { role: 'planner', text: currentThoughtRef.current }],
+          };
         });
-
-      } else if (data.type === 'scratchpad_update') {
-        setScratchpad(data.scratchpad);
+      } else if (data.type === 'tasks_plan' || data.type === 'scratchpad_update') {
+        const spData = data.scratchpad || {
+          high_level_goal: data.high_level_goal,
+          current_sub_task: data.current_sub_task,
+          completed_steps: [],
+          tasks: data.tasks || [],
+        };
+        updateActiveChat({ scratchpad: spData });
         currentThoughtRef.current = '';
-
       } else if (data.type === 'hitl_request') {
         setHitlRequest(data);
+        setIsThinking(false);
+        setAgentStatus('Approval required from user');
         currentThoughtRef.current = '';
+        setTimeout(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 50);
         if (window.electronAPI) {
-          window.electronAPI.showOverlay(data);
+          const hasVisualTarget = (data.bbox && (data.bbox[2] > 0 || data.bbox[3] > 0)) || (data.x > 0 || data.y > 0);
+          if (hasVisualTarget) {
+            window.electronAPI.showOverlay(data);
+          } else {
+            window.electronAPI.hideOverlay();
+          }
         }
-
+      } else if (data.type === 'ask_question') {
+        setQuestionModal(data.questions || []);
+        setSelectedAnswers({});
+        setCustomWriteIns({});
+        setIsThinking(false);
+        setAgentStatus('Awaiting your answer to question...');
+        currentThoughtRef.current = '';
+        setTimeout(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 50);
+      } else if (data.type === 'file_diff') {
+        updateActiveChat((chat) => ({
+          messages: [...(chat.messages || []), { role: 'diff', diff: data.diff }],
+        }));
+      } else if (data.type === 'artifact_update') {
+        const newArt = data.artifact;
+        setArtifacts((prev) => {
+          const filtered = prev.filter((a) => a.id !== newArt.id);
+          return [newArt, ...filtered];
+        });
+        setActiveArtifact(newArt);
+        updateActiveChat((chat) => ({
+          messages: [
+            ...(chat.messages || []),
+            { role: 'system', text: `📄 Living Artifact updated: ${newArt.title}` },
+          ],
+        }));
+      } else if (data.type === 'agent_response') {
+        updateActiveChat((chat) => ({
+          messages: [...(chat.messages || []), { role: 'assistant', text: data.text }],
+        }));
       } else if (data.type === 'goal_complete') {
         setIsAgentRunning(false);
+        setIsThinking(false);
         setHitlRequest(null);
-
+        setQuestionModal(null);
+        setAgentStatus('Goal complete!');
       }
     };
 
     socket.onclose = () => {
       setIsConnected(false);
-      setIsAgentRunning(false);
+      setIsThinking(false);
       wsRef.current = null;
+
+      setIsAgentRunning((wasRunning) => {
+        if (wasRunning) {
+          updateActiveChat((chat) => ({
+            messages: [
+              ...(chat.messages || []),
+              {
+                role: 'system',
+                text: '❌ Connection to Castor backend was interrupted. The agent was stopped.',
+              },
+            ],
+          }));
+        }
+        return false;
+      });
 
       const delay = getBackoffDelay(reconnectAttemptRef.current);
       reconnectAttemptRef.current += 1;
@@ -119,7 +717,7 @@ function ChatWindow() {
     socket.onerror = () => {
       socket.close();
     };
-  }, []);
+  }, [updateActiveChat]);
 
   useEffect(() => {
     connectWebSocket();
@@ -154,17 +752,53 @@ function ChatWindow() {
   const startGoal = () => {
     const ws = wsRef.current;
     if (!ws || !goal.trim() || isAgentRunning) return;
+
+    const goalText = goal.trim();
     currentThoughtRef.current = '';
-    setMessages([{ role: 'user', text: goal }]);
-    setScratchpad(null);
+
+    // Extract recent prior conversation history for multi-turn context
+    const priorHistory = (activeChat?.messages || [])
+      .filter((m) => {
+        if (m.role === 'user' || m.role === 'assistant') return true;
+        if (m.role === 'planner' && m.text) return true;
+        if (m.role === 'system' && m.text && (m.text.includes('DONE') || m.text.includes('Goal achieved') || m.text.includes('Report') || m.text.includes('improvement') || m.text.includes('Output:'))) return true;
+        return false;
+      })
+      .slice(-10)
+      .map((m) => ({
+        role: m.role === 'user' ? 'user' : 'model',
+        text: m.text,
+      }));
+
+    // If chat title is 'New Chat', set it to the first few words of the goal
+    updateActiveChat((chat) => {
+      const isInitial = !chat.title || chat.title === 'New Chat';
+      const newTitle = isInitial
+        ? goalText.slice(0, 36) + (goalText.length > 36 ? '...' : '')
+        : chat.title;
+      return {
+        title: newTitle,
+        project: chat.project || activeProject,
+        messages: [...(chat.messages || []), { role: 'user', text: goalText }],
+        scratchpad: null,
+      };
+    });
+
     setHitlRequest(null);
-    ws.send(JSON.stringify({
-      action: 'start_goal',
-      goal: goal,
-      hitl_enabled: hitlEnabled,
-    }));
+    ws.send(
+      JSON.stringify({
+        action: 'start_goal',
+        goal: goalText,
+        hitl_enabled: hitlEnabled,
+        project_path: activeProject?.path || null,
+        history: priorHistory,
+      })
+    );
     setGoal('');
     setIsAgentRunning(true);
+    setIsThinking(true);
+    setThinkingSeconds(0);
+    setAgentStatus('Connecting to agent and analyzing repository...');
   };
 
   const abortGoal = () => {
@@ -173,86 +807,366 @@ function ChatWindow() {
       ws.send(JSON.stringify({ action: 'abort' }));
     }
     setIsAgentRunning(false);
+    setIsThinking(false);
+    setThinkingSeconds(0);
     setHitlRequest(null);
+    setAgentStatus('Aborted by user.');
     if (window.electronAPI) window.electronAPI.hideOverlay();
   };
 
   const approveAction = () => {
+    if (!hitlRequest) return;
+    const actionText = hitlRequest.action;
     const ws = wsRef.current;
     if (ws) ws.send(JSON.stringify({ action: 'approve_action' }));
+
+    updateActiveChat((chat) => ({
+      messages: [
+        ...(chat.messages || []),
+        {
+          role: 'hitl_decision',
+          action: actionText,
+          approved: true,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ],
+    }));
+    setAgentStatus(`Approved. Executing: ${actionText}...`);
     setHitlRequest(null);
     if (window.electronAPI) window.electronAPI.hideOverlay();
   };
 
   const rejectAction = () => {
+    if (!hitlRequest) return;
+    const actionText = hitlRequest.action;
     const ws = wsRef.current;
     if (ws) ws.send(JSON.stringify({ action: 'reject_action' }));
+
+    updateActiveChat((chat) => ({
+      messages: [
+        ...(chat.messages || []),
+        {
+          role: 'hitl_decision',
+          action: actionText,
+          approved: false,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ],
+    }));
+    setAgentStatus('Action rejected and execution halted.');
     setHitlRequest(null);
     setIsAgentRunning(false);
     if (window.electronAPI) window.electronAPI.hideOverlay();
   };
 
+  const handleAnswerQuestion = () => {
+    if (!questionModal) return;
+    const answers = questionModal.map((q, idx) => {
+      const selected = selectedAnswers[idx] || [];
+      const writeIn = customWriteIns[idx] || '';
+      return {
+        question: q.question,
+        selected_options: Array.isArray(selected) ? selected : [selected].filter(Boolean),
+        custom_response: writeIn.trim(),
+      };
+    });
+
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        action: 'answer_question',
+        answers: answers,
+      }));
+    }
+
+    updateActiveChat((chat) => ({
+      messages: [
+        ...(chat.messages || []),
+        {
+          role: 'user_answer',
+          answers: answers,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ],
+    }));
+
+    setQuestionModal(null);
+    setAgentStatus('Response sent. Agent resuming...');
+    setIsThinking(true);
+  };
+
+  const handleSkipQuestion = () => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        action: 'skip_question',
+      }));
+    }
+    setQuestionModal(null);
+    setAgentStatus('Skipped question. Agent resuming...');
+    setIsThinking(true);
+  };
+
+  const handleGoalChange = (e) => {
+    const val = e.target.value;
+    setGoal(val);
+    if (val.startsWith('/') && !val.includes(' ')) {
+      setShowSlashMenu(true);
+    } else {
+      setShowSlashMenu(false);
+    }
+  };
+
+  const selectSlashCommand = (cmd) => {
+    setGoal(`${cmd} `);
+    setShowSlashMenu(false);
+  };
+
   const handleKeyDown = (e) => {
+    if (showSlashMenu && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault();
+      setSlashSelectedIdx((prev) => {
+        if (e.key === 'ArrowDown') {
+          return (prev + 1) % SLASH_COMMANDS.length;
+        } else {
+          return (prev - 1 + SLASH_COMMANDS.length) % SLASH_COMMANDS.length;
+        }
+      });
+      return;
+    }
+    if (showSlashMenu && (e.key === 'Tab' || (e.key === 'Enter' && !goal.includes(' ')))) {
+      e.preventDefault();
+      const cmd = SLASH_COMMANDS[slashSelectedIdx].command;
+      selectSlashCommand(cmd);
+      return;
+    }
+    if (e.key === 'Escape' && showSlashMenu) {
+      setShowSlashMenu(false);
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
+      setShowSlashMenu(false);
       startGoal();
     }
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="flex h-screen bg-[#09090b] text-zinc-200 font-sans selection:bg-blue-500/30 overflow-hidden">
-
+    <div className="flex h-screen w-screen bg-[#09090b] text-zinc-200 font-sans selection:bg-blue-500/30 overflow-hidden">
       {/* Left Sidebar */}
       <Sidebar
         isConnected={isConnected}
         availableSkills={availableSkills}
         activeSkills={activeSkills}
+        projects={projects}
+        activeProject={activeProject}
+        onSelectProject={handleSelectProject}
+        onCreateProject={handleCreateProject}
+        onBrowseProject={handleBrowseProject}
+        autoCreateProject={autoCreateProject}
+        onToggleAutoCreate={handleToggleAutoCreate}
+        chats={chats}
+        activeChatId={activeChatId}
+        onSelectChat={handleSelectChat}
+        onNewChat={handleNewChat}
+        onDeleteChat={handleDeleteChat}
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 relative">
-
-        {/* Interactive Scratchpad Banner */}
-        {scratchpad && (
-          <div className="absolute top-0 inset-x-0 z-10 bg-[#09090b]/80 backdrop-blur-md border-b border-zinc-800 p-3 shadow-sm">
-            <div className="max-w-3xl mx-auto flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest flex items-center gap-1.5">
-                  <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-                  Active Goal
+      <div className="flex-1 flex flex-col min-w-0 relative h-full">
+        {/* Top Chat Header Bar */}
+        <header className="h-12 border-b border-zinc-800/80 bg-[#09090b]/90 backdrop-blur px-5 flex items-center justify-between z-10 select-none">
+          <div className="flex items-center gap-3 min-w-0">
+            <h1 className="text-sm font-semibold text-zinc-200 truncate">
+              {activeChat?.title || 'New Chat'}
+            </h1>
+            <div className="h-3.5 w-px bg-zinc-800" />
+            <div className="flex items-center gap-1.5 text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 px-2.5 py-1 rounded-full truncate max-w-sm">
+              <span className="text-xs">📁</span>
+              <span className="font-medium text-zinc-300 truncate">
+                {activeProject ? activeProject.name : 'No project linked'}
+              </span>
+              {activeProject?.path && (
+                <span className="text-[10px] text-zinc-500 font-mono hidden md:inline truncate ml-1">
+                  ({activeProject.path})
                 </span>
-                <span className="text-xs text-zinc-500 font-medium">{scratchpad.completed_steps?.length || 0} steps completed</span>
-              </div>
-              <div className="text-sm font-medium text-zinc-200 leading-snug">{scratchpad.high_level_goal}</div>
-              <div className="flex items-start gap-2 mt-1 bg-zinc-900/50 p-2 rounded-md border border-zinc-800/80">
-                <div className="text-orange-400 mt-0.5">
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsArtifactsOpen((prev) => !prev)}
+              className={`text-xs px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm border ${
+                artifacts.length > 0
+                  ? 'bg-blue-950/50 hover:bg-blue-900/60 text-blue-200 border-blue-700/50'
+                  : 'text-zinc-400 hover:text-zinc-200 bg-zinc-850 hover:bg-zinc-800 border-zinc-750'
+              }`}
+              title="Toggle Living Artifacts, Plans, and Specs"
+            >
+              <span>📄</span>
+              <span>Artifacts</span>
+              {artifacts.length > 0 && (
+                <span className="text-[10px] font-mono bg-blue-600 text-white px-1.5 py-0.2 rounded-full font-bold">
+                  {artifacts.length}
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={handleBrowseProject}
+              className="text-xs text-zinc-400 hover:text-zinc-200 bg-zinc-850 hover:bg-zinc-800 border border-zinc-750 px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm"
+              title="Change project folder"
+            >
+              <span>📂</span>
+              <span>Change Project</span>
+            </button>
+          </div>
+        </header>
+
+        {/* Antigravity-Style Tasks & Roadmap Panel */}
+        {scratchpad && (
+          <div className="bg-[#0e0e11] border-b border-zinc-800/80 px-5 py-3 shadow-md z-10 flex-shrink-0 transition-all">
+            <div className="max-w-3xl mx-auto flex flex-col gap-2.5">
+              {/* Header row with stats & collapse toggle */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                  <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">
+                    Milestones Roadmap
+                  </span>
+                  {scratchpad.tasks && scratchpad.tasks.length > 0 && (
+                    <span className="text-[10px] font-mono bg-zinc-800/80 text-zinc-300 px-2 py-0.5 rounded-full border border-zinc-700/60">
+                      {scratchpad.tasks.filter((t) => t.status === 'completed').length}/{scratchpad.tasks.length} Done
+                    </span>
+                  )}
                 </div>
-                <div className="text-xs text-zinc-300">
-                  <span className="text-zinc-500 mr-1">Current Task:</span>
-                  {scratchpad.current_sub_task}
+
+                <div className="flex items-center gap-3">
+                  <span className="text-[11px] text-zinc-500 font-mono hidden sm:inline">
+                    {scratchpad.completed_steps?.length || 0} actions taken
+                  </span>
+                  <button
+                    onClick={() => setIsTasksExpanded(!isTasksExpanded)}
+                    className="text-xs text-zinc-400 hover:text-zinc-200 bg-zinc-850 hover:bg-zinc-800 px-2 py-0.5 rounded border border-zinc-750 flex items-center gap-1 transition-colors"
+                  >
+                    <span>{isTasksExpanded ? 'Hide Tasks' : 'Show Tasks'}</span>
+                    <svg
+                      className={`w-3 h-3 transition-transform ${isTasksExpanded ? 'rotate-180' : ''}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
                 </div>
               </div>
+
+              {/* High-level goal */}
+              <div className="text-xs font-medium text-zinc-200 leading-snug line-clamp-2">
+                {scratchpad.high_level_goal}
+              </div>
+
+              {/* Active Current Task Highlight */}
+              {scratchpad.current_sub_task && (
+                <div className="flex items-center gap-2 bg-gradient-to-r from-blue-950/40 to-zinc-900/60 border border-blue-800/40 p-2 rounded-lg text-xs">
+                  <div className="text-blue-400 animate-pulse flex-shrink-0">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                  </div>
+                  <div className="flex-1 truncate">
+                    <span className="text-blue-400 font-medium mr-1.5">In Progress:</span>
+                    <span className="text-zinc-200">{scratchpad.current_sub_task}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Structured Task Checklist (Antigravity-Style) */}
+              {isTasksExpanded && scratchpad.tasks && scratchpad.tasks.length > 0 && (
+                <div className="space-y-1.5 mt-1 max-h-48 overflow-y-auto pr-1">
+                  {scratchpad.tasks.map((task) => {
+                    const isDone = task.status === 'completed';
+                    const isCurrent = task.status === 'in_progress';
+                    const isFailed = task.status === 'failed';
+                    return (
+                      <div
+                        key={task.id}
+                        className={`flex items-center gap-2.5 px-3 py-1.5 rounded-lg border text-xs transition-all ${
+                          isDone
+                            ? 'bg-emerald-950/15 border-emerald-900/30 text-zinc-400'
+                            : isCurrent
+                            ? 'bg-blue-950/30 border-blue-600/50 text-blue-100 shadow-sm shadow-blue-950'
+                            : isFailed
+                            ? 'bg-red-950/20 border-red-900/40 text-red-300'
+                            : 'bg-zinc-900/40 border-zinc-800/60 text-zinc-400'
+                        }`}
+                      >
+                        {/* Status Icon */}
+                        <div className="flex-shrink-0">
+                          {isDone ? (
+                            <div className="w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-[10px]">
+                              ✓
+                            </div>
+                          ) : isCurrent ? (
+                            <div className="w-4 h-4 rounded-full bg-blue-500/20 border border-blue-400 flex items-center justify-center">
+                              <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-ping" />
+                            </div>
+                          ) : isFailed ? (
+                            <div className="w-4 h-4 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center font-bold text-[10px]">
+                              ✗
+                            </div>
+                          ) : (
+                            <div className="w-4 h-4 rounded-full border border-zinc-700 flex items-center justify-center text-[10px] text-zinc-500 font-mono">
+                              {task.id}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Title */}
+                        <span className={`flex-1 truncate ${isDone ? 'line-through text-zinc-500' : isCurrent ? 'font-medium text-zinc-100' : ''}`}>
+                          {task.title}
+                        </span>
+
+                        {/* Status Tag */}
+                        <span
+                          className={`text-[10px] font-mono uppercase px-1.5 py-0.5 rounded ${
+                            isDone
+                              ? 'text-emerald-500 font-medium'
+                              : isCurrent
+                              ? 'bg-blue-500/20 text-blue-300 font-medium'
+                              : 'text-zinc-600'
+                          }`}
+                        >
+                          {task.status.replace('_', ' ')}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         )}
 
         {/* Messages Feed */}
-        <main className={`flex-1 overflow-y-auto px-4 pb-32 ${scratchpad ? 'pt-36' : 'pt-8'}`}>
-          <div className="max-w-3xl mx-auto space-y-6">
+        <main className="flex-1 overflow-y-auto px-4 py-6 pb-36">
+          <div className="max-w-3xl mx-auto space-y-5">
             {messages.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-full min-h-[50vh] text-center text-zinc-500">
-                <div className="w-16 h-16 mb-6 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center shadow-lg">
-                  <span className="text-2xl">🪄</span>
+              <div className="flex flex-col items-center justify-center min-h-[50vh] text-center text-zinc-500 select-none">
+                <div className="w-14 h-14 mb-4 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center shadow-lg text-2xl">
+                  🪄
                 </div>
-                <h2 className="text-xl font-medium text-zinc-300 mb-2">How can I help you today?</h2>
-                <p className="text-sm text-zinc-500 max-w-sm">
-                  Describe what you want me to do on your desktop. I can browse the web, write code, or control applications.
+                <h2 className="text-lg font-medium text-zinc-200 mb-1.5">How can I help you today?</h2>
+                <p className="text-xs text-zinc-400 max-w-sm mb-4">
+                  Operating in project:{' '}
+                  <span className="font-semibold text-zinc-200 font-mono">
+                    {activeProject ? activeProject.name : 'Castor Workspace'}
+                  </span>
                 </p>
-                <div className="mt-8 px-3 py-1.5 rounded-full bg-zinc-900 border border-zinc-800 text-xs font-medium text-zinc-500">
+                <div className="px-3 py-1.5 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] font-medium text-zinc-500">
                   Kill Switch: <kbd className="font-mono bg-zinc-800 px-1 py-0.5 rounded text-zinc-400">Ctrl+Shift+Esc</kbd>
                 </div>
               </div>
@@ -269,7 +1183,80 @@ function ChatWindow() {
                 );
               }
 
+              if (msg.role === 'hitl_decision') {
+                const isApproved = msg.approved;
+                return (
+                  <div key={i} className="flex justify-start max-w-3xl my-2">
+                    <div
+                      className={`w-8 h-8 rounded-full border flex items-center justify-center mr-3 mt-1 flex-shrink-0 text-xs font-bold ${
+                        isApproved
+                          ? 'bg-emerald-950/60 border-emerald-600/60 text-emerald-400'
+                          : 'bg-red-950/60 border-red-600/60 text-red-400'
+                      }`}
+                    >
+                      {isApproved ? '✓' : '✕'}
+                    </div>
+                    <div
+                      className={`flex-1 rounded-xl p-3.5 border shadow-md ${
+                        isApproved
+                          ? 'bg-emerald-950/20 border-emerald-600/40 text-emerald-200'
+                          : 'bg-red-950/20 border-red-600/40 text-red-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span
+                          className={`text-xs font-semibold uppercase tracking-wider ${
+                            isApproved ? 'text-emerald-400' : 'text-red-400'
+                          }`}
+                        >
+                          {isApproved ? 'Action Approved & Executing' : 'Action Rejected'}
+                        </span>
+                        {msg.time && (
+                          <span className="text-[11px] text-zinc-500 font-mono">{msg.time}</span>
+                        )}
+                      </div>
+                      <p className="text-zinc-200 text-xs bg-zinc-900/90 p-2.5 rounded-lg border border-zinc-800 font-mono break-all select-text">
+                        {msg.action}
+                      </p>
+                    </div>
+                  </div>
+                );
+              }
+
               if (msg.role === 'system') {
+                const isError = msg.text.startsWith('❌') || msg.text.toLowerCase().includes('agent error:');
+                if (isError) {
+                  return (
+                    <div key={i} className="flex justify-start max-w-3xl my-2 ml-11">
+                      <div className="bg-red-950/40 border border-red-800/60 text-red-200 px-4 py-2.5 rounded-xl text-xs font-mono shadow-md flex items-start gap-2.5 max-w-full">
+                        <span className="shrink-0 text-red-400 font-bold">❌</span>
+                        <span className="break-all whitespace-pre-wrap">{msg.text.replace(/^❌\s*/, '').trim()}</span>
+                      </div>
+                    </div>
+                  );
+                }
+
+                const isOutput =
+                  msg.text.startsWith('✅') ||
+                  msg.text.startsWith('⚠️') ||
+                  msg.text.startsWith('💻') ||
+                  msg.text.startsWith('⚡') ||
+                  msg.text.startsWith('⌨️') ||
+                  msg.text.startsWith('🎯') ||
+                  msg.text.startsWith('▶') ||
+                  msg.text.startsWith('🛑');
+
+                if (isOutput) {
+                  return (
+                    <div key={i} className="flex justify-start max-w-3xl my-1.5 ml-11">
+                      <div className="bg-zinc-900/90 border border-zinc-800 text-zinc-300 px-3.5 py-2 rounded-xl text-xs font-mono shadow-sm flex items-start gap-2.5 max-w-full overflow-hidden">
+                        <span className="shrink-0">{msg.text.slice(0, 2)}</span>
+                        <span className="break-all whitespace-pre-wrap">{msg.text.slice(2).trim()}</span>
+                      </div>
+                    </div>
+                  );
+                }
+
                 return (
                   <div key={i} className="flex justify-center my-2">
                     <div className="text-xs text-zinc-500 flex items-center gap-2">
@@ -282,9 +1269,10 @@ function ChatWindow() {
               }
 
               if (msg.role === 'planner') {
+                if (!msg.text?.trim()) return null;
                 return (
                   <div key={i} className="flex justify-start max-w-3xl">
-                    <div className="w-8 h-8 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center mr-3 mt-1 flex-shrink-0 text-xs">
+                    <div className="w-8 h-8 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center mr-3 mt-1 flex-shrink-0 text-xs shadow-sm">
                       🤖
                     </div>
                     <div className="flex-1 overflow-hidden">
@@ -294,16 +1282,96 @@ function ChatWindow() {
                 );
               }
 
+              if (msg.role === 'assistant') {
+                return (
+                  <div key={i} className="flex justify-start max-w-3xl my-3">
+                    <div className="w-8 h-8 rounded-full bg-blue-600/20 border border-blue-500/40 flex items-center justify-center mr-3 mt-1 flex-shrink-0 text-sm shadow-sm">
+                      🪄
+                    </div>
+                    <div className="flex-1 bg-[#18181b] border border-zinc-800 rounded-2xl p-4 shadow-lg text-sm text-zinc-200 leading-relaxed whitespace-pre-wrap select-text font-sans">
+                      {msg.text}
+                    </div>
+                  </div>
+                );
+              }
+
+              if (msg.role === 'diff') {
+                return (
+                  <div key={i} className="flex justify-start max-w-3xl my-2 ml-11">
+                    <div className="flex-1 overflow-hidden">
+                      <DiffViewer diffData={msg.diff} />
+                    </div>
+                  </div>
+                );
+              }
+
+              if (msg.role === 'user_answer') {
+                return (
+                  <div key={i} className="flex justify-end my-2">
+                    <div className="bg-blue-950/40 border border-blue-800/40 text-blue-200 px-4 py-2.5 rounded-2xl rounded-br-sm max-w-[80%] text-xs shadow-sm space-y-1.5">
+                      <span className="font-semibold text-blue-400 block uppercase tracking-wider text-[10px]">
+                        Clarification Provided:
+                      </span>
+                      {msg.answers?.map((a, aIdx) => (
+                        <div key={aIdx} className="space-y-0.5">
+                          <p className="font-medium text-zinc-300">{a.question}</p>
+                          <p className="text-zinc-100 font-semibold">
+                            {a.selected_options?.join(', ') || a.custom_response || 'Skipped'}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              }
+
               return null;
             })}
+
+            {/* Live Thinking Card in Message Stream */}
+            {isThinking && (
+              <div className="flex justify-start max-w-3xl my-3">
+                <div className="w-8 h-8 rounded-full bg-blue-950/80 border border-blue-600/60 flex items-center justify-center mr-3 mt-1 flex-shrink-0 text-xs shadow-md">
+                  <div className="w-4 h-4 rounded-full border-2 border-blue-400 border-t-transparent animate-spin" />
+                </div>
+                <div className="flex-1 bg-gradient-to-r from-zinc-900/90 via-[#18181b] to-zinc-900/80 border border-blue-800/40 rounded-2xl p-4 shadow-xl backdrop-blur-sm">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                        </span>
+                        Castor is Thinking
+                      </span>
+                    </div>
+                    <span className="text-[11px] font-mono text-blue-300 bg-blue-950/60 px-2 py-0.5 rounded-full border border-blue-800/50">
+                      {thinkingSeconds}s
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-300 font-mono flex items-center gap-2">
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span>
+                    <span className="truncate">{agentStatus || 'Analyzing context and formulating plan...'}</span>
+                  </p>
+                  <div className="mt-3 flex gap-1.5 items-center">
+                    <div className="h-1 flex-1 bg-zinc-800 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-blue-600 to-indigo-500 rounded-full transition-all duration-300 ease-out"
+                        style={{ width: `${Math.min(100, Math.max(15, (thinkingSeconds % 12) * 8.5))}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* HitL Request Inject */}
             {hitlRequest && (
               <div className="flex justify-start max-w-3xl mt-4">
-                <div className="w-8 h-8 rounded-full bg-orange-900/50 border border-orange-800 flex items-center justify-center mr-3 mt-1 flex-shrink-0 text-xs text-orange-400">
+                <div className="w-8 h-8 rounded-full bg-orange-900/50 border border-orange-800 flex items-center justify-center mr-3 mt-1 flex-shrink-0 text-xs text-orange-400 font-bold">
                   !
                 </div>
-                <div className="flex-1 bg-[#18181b] border border-orange-900/50 rounded-xl p-4 shadow-lg">
+                <div className="flex-1 bg-[#18181b] border border-orange-900/50 rounded-xl p-4 shadow-xl">
                   <h3 className="text-sm font-medium text-orange-400 mb-1">Approval Required</h3>
                   <p className="text-zinc-300 text-sm mb-4 bg-zinc-900 p-2 rounded border border-zinc-800 font-mono">
                     {hitlRequest.action}
@@ -326,29 +1394,201 @@ function ChatWindow() {
               </div>
             )}
 
+            {/* Antigravity-style Interactive Question Card */}
+            {questionModal && questionModal.length > 0 && (
+              <div className="flex justify-start max-w-3xl mt-4">
+                <div className="w-8 h-8 rounded-full bg-blue-600/20 border border-blue-500/40 flex items-center justify-center mr-3 mt-1 flex-shrink-0 text-sm shadow-sm">
+                  ❓
+                </div>
+                <div className="flex-1 bg-[#18181b] border border-blue-900/50 rounded-2xl p-5 shadow-2xl space-y-4">
+                  <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                      </span>
+                      <h3 className="text-xs font-semibold uppercase tracking-wider text-blue-400">
+                        Agent Needs Clarification
+                      </h3>
+                    </div>
+                    <span className="text-[11px] font-mono text-zinc-500">
+                      {questionModal.length} question{questionModal.length > 1 ? 's' : ''}
+                    </span>
+                  </div>
+
+                  {questionModal.map((q, idx) => {
+                    const isMulti = q.is_multi_select;
+                    const selected = selectedAnswers[idx] || [];
+
+                    const toggleOption = (opt) => {
+                      setSelectedAnswers((prev) => {
+                        const current = prev[idx] || [];
+                        if (isMulti) {
+                          const exists = current.includes(opt);
+                          return {
+                            ...prev,
+                            [idx]: exists ? current.filter((o) => o !== opt) : [...current, opt],
+                          };
+                        } else {
+                          return { ...prev, [idx]: [opt] };
+                        }
+                      });
+                    };
+
+                    return (
+                      <div key={idx} className="space-y-3 pt-1">
+                        <p className="text-sm font-medium text-zinc-100">
+                          {q.question}
+                        </p>
+
+                        {q.options && q.options.length > 0 && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {q.options.map((opt, optIdx) => {
+                              const isChecked = selected.includes(opt);
+                              return (
+                                <button
+                                  key={optIdx}
+                                  type="button"
+                                  onClick={() => toggleOption(opt)}
+                                  className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border text-left text-xs transition-all ${
+                                    isChecked
+                                      ? 'border-blue-500 bg-blue-500/15 text-blue-200 font-medium shadow-sm'
+                                      : 'border-zinc-800 bg-zinc-900/60 hover:bg-zinc-850 hover:border-zinc-700 text-zinc-300'
+                                  }`}
+                                >
+                                  <div
+                                    className={`w-4 h-4 rounded-${isMulti ? 'md' : 'full'} border flex items-center justify-center text-[10px] shrink-0 transition-colors ${
+                                      isChecked
+                                        ? 'border-blue-500 bg-blue-600 text-white'
+                                        : 'border-zinc-650 bg-zinc-800'
+                                    }`}
+                                  >
+                                    {isChecked && (isMulti ? '✓' : '•')}
+                                  </div>
+                                  <span className="truncate">{opt}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        <input
+                          type="text"
+                          placeholder="Or type a custom write-in response..."
+                          value={customWriteIns[idx] || ''}
+                          onChange={(e) =>
+                            setCustomWriteIns((prev) => ({ ...prev, [idx]: e.target.value }))
+                          }
+                          className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2 text-xs text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-blue-500/80 transition-colors"
+                        />
+                      </div>
+                    );
+                  })}
+
+                  <div className="flex items-center gap-3 pt-2 border-t border-zinc-800/80">
+                    <button
+                      type="button"
+                      onClick={handleAnswerQuestion}
+                      className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2 rounded-xl text-xs font-medium transition-colors shadow-sm flex items-center justify-center gap-1.5"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      Submit Response
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSkipQuestion}
+                      className="px-4 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 py-2 rounded-xl text-xs font-medium transition-colors border border-zinc-700/60"
+                    >
+                      Skip
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Live Agent Running Status Indicator */}
+            {isAgentRunning && !isThinking && (
+              <div className="flex items-center justify-between py-2 px-3.5 my-2 max-w-xl rounded-xl bg-zinc-900/90 border border-blue-900/40 shadow-sm ml-11">
+                <div className="flex items-center gap-2.5 truncate">
+                  <span className="relative flex h-2.5 w-2.5 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500"></span>
+                  </span>
+                  <span className="text-xs font-mono text-zinc-300 truncate">
+                    {agentStatus || 'Agent is executing...'}
+                  </span>
+                </div>
+                <span className="text-[11px] font-mono text-zinc-500 shrink-0 ml-3">
+                  {thinkingSeconds}s
+                </span>
+              </div>
+            )}
+
             <div ref={messagesEndRef} className="h-4" />
           </div>
         </main>
 
         {/* Elevated Bottom Input Dock */}
-        <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-[#09090b] via-[#09090b] to-transparent pt-10 pb-6 px-4">
-          <div className="max-w-3xl mx-auto">
-            <div className="bg-[#18181b] border border-zinc-800 rounded-2xl shadow-xl overflow-hidden focus-within:border-zinc-700 focus-within:ring-1 focus-within:ring-zinc-700 transition-all">
+        <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-[#09090b] via-[#09090b]/90 to-transparent pt-8 pb-5 px-4 pointer-events-none">
+          <div className="max-w-3xl mx-auto pointer-events-auto">
+            {/* Slash Command Autocomplete Popover */}
+            {showSlashMenu && (
+              <div className="mb-2 bg-[#121216] border border-blue-900/60 rounded-xl shadow-2xl p-1.5 space-y-1 backdrop-blur-md animate-in fade-in-50 duration-150">
+                <div className="px-2.5 py-1 text-[10px] font-bold text-zinc-500 uppercase tracking-wider flex items-center justify-between border-b border-zinc-800/80">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+                    <span>Antigravity Slash Commands</span>
+                  </span>
+                  <span className="font-mono text-[9px] text-zinc-500">Tab / Enter to insert</span>
+                </div>
+                <div className="space-y-0.5 max-h-52 overflow-y-auto">
+                  {SLASH_COMMANDS.map((item, idx) => {
+                    const isSelected = idx === slashSelectedIdx;
+                    return (
+                      <button
+                        key={item.command}
+                        type="button"
+                        onClick={() => selectSlashCommand(item.command)}
+                        onMouseEnter={() => setSlashSelectedIdx(idx)}
+                        className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-left transition-colors ${
+                          isSelected
+                            ? 'bg-blue-600/20 text-white border border-blue-500/40'
+                            : 'hover:bg-zinc-850 text-zinc-300'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="font-mono font-bold text-xs text-blue-400">{item.command}</span>
+                          <span className="text-xs text-zinc-200 font-medium truncate">{item.title}</span>
+                          <span className="text-[11px] text-zinc-500 hidden sm:inline truncate max-w-xs">{item.desc}</span>
+                        </div>
+                        <span className="text-[9px] font-mono bg-zinc-800 text-zinc-400 px-1.5 py-0.5 rounded ml-2 shrink-0">
+                          {item.badge}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div className="bg-[#18181b] border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden focus-within:border-zinc-700 focus-within:ring-1 focus-within:ring-zinc-700 transition-all">
               <TextareaAutosize
                 minRows={1}
                 maxRows={8}
                 value={goal}
-                onChange={(e) => setGoal(e.target.value)}
+                onChange={handleGoalChange}
                 onKeyDown={handleKeyDown}
-                placeholder="Message Castor..."
+                placeholder={activeProject ? `Message Castor in ${activeProject.name}... (Type / for commands)` : 'Message Castor... (Type / for commands)'}
                 disabled={!isConnected || isAgentRunning}
-                className="w-full bg-transparent text-zinc-200 px-4 py-3.5 resize-none outline-none text-sm placeholder:text-zinc-500 disabled:opacity-50"
+                className="w-full bg-transparent text-zinc-200 px-4 py-3 resize-none outline-none text-sm placeholder:text-zinc-500 disabled:opacity-50"
               />
 
-              <div className="flex items-center justify-between px-3 pb-3 pt-1">
+              <div className="flex items-center justify-between px-3 pb-2.5 pt-1">
                 {/* Toggles & Actions */}
                 <div className="flex items-center gap-3">
-                  <label className="flex items-center gap-2 cursor-pointer group">
+                  <label className="flex items-center gap-2 cursor-pointer group select-none">
                     <div className="relative flex items-center">
                       <input
                         type="checkbox"
@@ -383,14 +1623,14 @@ function ChatWindow() {
                 <button
                   onClick={startGoal}
                   disabled={!isConnected || !goal.trim() || isAgentRunning}
-                  className="bg-zinc-200 hover:bg-white text-zinc-900 disabled:bg-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed p-1.5 rounded-lg transition-colors flex items-center justify-center"
+                  className="bg-zinc-200 hover:bg-white text-zinc-900 disabled:bg-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed p-1.5 rounded-lg transition-colors flex items-center justify-center shadow-sm"
                 >
                   {isAgentRunning ? (
-                     <div className="w-5 h-5 flex items-center justify-center gap-0.5">
-                       <span className="w-1 h-1 bg-zinc-500 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
-                       <span className="w-1 h-1 bg-zinc-500 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
-                       <span className="w-1 h-1 bg-zinc-500 rounded-full animate-bounce"></span>
-                     </div>
+                    <div className="w-5 h-5 flex items-center justify-center gap-0.5">
+                      <span className="w-1 h-1 bg-zinc-500 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                      <span className="w-1 h-1 bg-zinc-500 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                      <span className="w-1 h-1 bg-zinc-500 rounded-full animate-bounce"></span>
+                    </div>
                   ) : (
                     <svg className="w-5 h-5 translate-x-[1px] translate-y-[0.5px]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
@@ -401,12 +1641,22 @@ function ChatWindow() {
             </div>
 
             <div className="text-center mt-2">
-              <span className="text-[10px] text-zinc-600">Castor can make mistakes. Consider verifying actions on sensitive systems.</span>
+              <span className="text-[10px] text-zinc-600 select-none">
+                Castor can make mistakes. Consider verifying actions on sensitive systems.
+              </span>
             </div>
           </div>
         </div>
-
       </div>
+
+      {/* Antigravity-Style Living Artifacts Sidecar Drawer */}
+      <ArtifactsDrawer
+        isOpen={isArtifactsOpen}
+        onClose={() => setIsArtifactsOpen(false)}
+        artifacts={artifacts}
+        activeArtifact={activeArtifact}
+        onSelectArtifact={(art) => setActiveArtifact(art)}
+      />
     </div>
   );
 }

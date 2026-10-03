@@ -2,7 +2,10 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-from .router import router
+try:
+    from .router import router
+except ImportError:
+    from router import router
 
 load_dotenv()
 
@@ -29,4 +32,6 @@ async def health_check():
 
 
 if __name__ == "__main__":
-    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True)
+    import os
+    should_reload = os.getenv("CASTOR_RELOAD", "false").lower() == "true"
+    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=should_reload)
