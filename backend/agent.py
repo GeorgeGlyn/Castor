@@ -139,7 +139,7 @@ class ReplacementChunkItem(BaseModel):
 
 
 class ActionParams(BaseModel):
-    action: str        # "click" | "drag" | "type" | "hotkey" | "scroll" | "bash" | "done" | "skill" | "run_skill_script" | "view_file" | "write_to_file" | "replace_file_content" | "multi_replace_file_content" | "list_dir" | "grep_search" | "search_web" | "read_url_content" | "ask_question" | "manage_task" | "save_knowledge" | "get_knowledge" | "invoke_subagent" | "create_artifact" | "update_artifact"
+    action: str        # "click" | "drag" | "type" | "hotkey" | "scroll" | "bash" | "done" | "skill" | "run_skill_script" | "view_file" | "write_to_file" | "replace_file_content" | "multi_replace_file_content" | "list_dir" | "grep_search" | "search_web" | "read_url_content" | "list_windows" | "focus_window" | "ask_question" | "manage_task" | "save_knowledge" | "get_knowledge" | "invoke_subagent" | "create_artifact" | "update_artifact"
     target: Optional[str] = None       # Semantic description for click/drag/scroll, or skill name for run_skill_script
     destination: Optional[str] = None  # Semantic description for drag end
     text: Optional[str] = None         # For type / bash / skill name / script name / URL / query, OR full detailed report/answer for 'done'
@@ -663,8 +663,9 @@ class AgentLoop:
             "     * If the dropdown is closed:\n"
             "       Emit a 2-action batch: Action 1: 'click' (target='the Tools menu in Unity'), Action 2: 'click' (target='the Build Super Mario Level 1 item in the Tools dropdown').\n"
             "       OR keyboard shortcut: 'hotkey' with ['alt', 't'] to open Tools, then 'hotkey' with ['enter'].\n"
-            "4. LAUNCHING APPLICATIONS:\n"
-            "   - To open an application: emit a batch with action 'hotkey' (keys: ['win']), "
+            "4. LAUNCHING APPLICATIONS & SWITCHING WINDOWS:\n"
+            "   - To switch to an already running application (Unity, Chrome, VS Code): use action 'focus_window' with target='Unity' (or 'Chrome', etc.). It brings the window to the front in 10ms deterministically without failing or clicking the taskbar!\n"
+            "   - To open a new application: emit a batch with action 'hotkey' (keys: ['win']), "
             "     action 'type' (text: 'Unity Hub' or application name), and action 'hotkey' (keys: ['enter']).\n"
             "   - Alternatively, use action 'bash' to inspect or launch software (e.g., PowerShell commands).\n"
             "   - If the application icon is already visible on the taskbar or desktop, click it.\n"
@@ -685,6 +686,8 @@ class AgentLoop:
             "   - 'grep_search': search for symbols or text across workspace files. Set 'query' and optional 'path'.\n"
             "   - 'search_web': live web search (DuckDuckGo) for official documentation, APIs, and error solutions. Set 'query'.\n"
             "   - 'read_url_content': fetch live web page or markdown documentation directly. Set 'path' or 'text' to URL.\n"
+            "   - 'list_windows': inspect all open desktop applications and window titles (e.g. Unity, Chrome, VS Code).\n"
+            "   - 'focus_window': deterministically brings an application window to the foreground instantly by name or partial title (e.g. target='Unity', target='Chrome', target='VS Code'). PREFERRED over guessing taskbar clicks or Alt+Tab!\n"
             "   - 'bash': PowerShell shell command in 'text'. Set 'is_background': true if starting a long-running dev server, build watcher, or daemon process!\n"
             "   - 'manage_task': manage background processes. Set 'task_action' ('status', 'logs', 'kill', 'list') and optional 'task_id' (e.g. 'task-1').\n"
             "   - 'save_knowledge': store architectural patterns, bug fixes, or gotchas into persistent memory. Set 'knowledge_title', 'knowledge_summary', 'content', and optional 'knowledge_tags'.\n"
@@ -1587,6 +1590,36 @@ class AgentLoop:
                                 parts=[types.Part(text=f"[ARTIFACT UPDATE ERROR]\nArtifact with ID '{a_id}' not found.")],
                             ))
                         await asyncio.sleep(0.2)
+
+                    # ── list_windows ─────────────────────────────────────────
+                    elif action_type == "list_windows":
+                        await self.send_status("🪟 Scanning open application windows...")
+                        ok, res_text = await asyncio.to_thread(dev_tools.list_windows)
+                        await self.send_status("✅ Retrieved open application windows.")
+                        rolling_history.append(types.Content(
+                            role="user",
+                            parts=[types.Part(text=f"[LIST_WINDOWS RESULT]\n{res_text}")],
+                        ))
+                        await asyncio.sleep(0.2)
+
+                    # ── focus_window ─────────────────────────────────────────
+                    elif action_type == "focus_window":
+                        win_query = action_param.target or action_param.text or ""
+                        if not win_query:
+                            await self.send_status("⚠️ focus_window requires 'target' or 'text' with the window or app name.")
+                            continue
+                        await self.send_status(f"🎯 Bringing window to foreground: '{win_query}'...")
+                        ok, res_text = await asyncio.to_thread(dev_tools.focus_window, win_query)
+                        if ok:
+                            await self.send_status(f"✅ {res_text}")
+                        else:
+                            await self.send_status(f"⚠️ {res_text}")
+                        rolling_history.append(types.Content(
+                            role="user",
+                            parts=[types.Part(text=f"[FOCUS_WINDOW RESULT]\n{res_text}")],
+                        ))
+                        # Brief pause for OS window manager z-order transition
+                        await asyncio.sleep(0.5)
 
                     # ── type ─────────────────────────────────────────────────
                     elif action_type == "type":

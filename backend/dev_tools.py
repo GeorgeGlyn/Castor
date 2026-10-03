@@ -424,3 +424,142 @@ def read_url_content(url: str, max_chars: int = 10000) -> Tuple[bool, str]:
     except Exception as e:
         return False, f"Failed to fetch content from URL '{url}': {e}"
 
+
+def get_active_windows() -> List[dict]:
+    """Retrieve list of active, visible top-level application windows using tasklist."""
+    import subprocess
+    import csv
+    import io
+
+    cmd = ["tasklist", "/v", "/fo", "csv"]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=8)
+        if proc.returncode != 0:
+            return []
+    except Exception:
+        return []
+
+    reader = csv.reader(io.StringIO(proc.stdout))
+    rows = list(reader)
+    if not rows:
+        return []
+
+    # Ignored helper / invisible window titles
+    IGNORED_TITLES = {
+        "n/a", "olemainthreadwndname", "default ime", "msctfime ui",
+        "dwm notification window", "media context notification window",
+        "desktopwindowxamlsource", "quick settings", "start",
+        "notificationwindowhelper", "task host window",
+        "wingetmessageonlywindow", "temp window", "remote frame message window",
+        "command palette toast", "hidden window", "realtekaudioadminbackgroundprocessclass",
+        "realtekaudiobackgroundprocessclass", "windows push notifications platform",
+        "crossdeviceresumewindow", "adb power notification window",
+        "adobe collab synchronizer notification", "idm drop target. drop web-links for downloading here"
+    }
+
+    windows = []
+    seen = set()
+
+    for row in rows[1:]:
+        if len(row) >= 9:
+            image_name, pid, session_name, _, mem, status, user, _, title = row[:9]
+            title = title.strip()
+            title_lower = title.lower()
+
+            if not title or title_lower in IGNORED_TITLES:
+                continue
+            if title_lower.startswith((".net-broadcasteventwindow", "gdi+ window", "olechannelwnd")):
+                continue
+            if title_lower.endswith(("processclass", "notification", "overlay")):
+                continue
+
+            # Skip duplicate entries
+            key = (image_name.lower(), title_lower)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            windows.append({
+                "image": image_name,
+                "pid": int(pid) if pid.isdigit() else 0,
+                "title": title,
+            })
+
+    return windows
+
+
+def list_windows() -> Tuple[bool, str]:
+    """Return formatted list of all open applications and their window titles."""
+    windows = get_active_windows()
+    if not windows:
+        return True, "No open application windows detected."
+
+    lines = [f"Found {len(windows)} active application window(s):", "=" * 60]
+    for w in windows:
+        lines.append(f"• [{w['image']} | PID {w['pid']}] \"{w['title']}\"")
+    return True, "\n".join(lines)
+
+
+def focus_window(query: str) -> Tuple[bool, str]:
+    """Deterministically bring an application window to the foreground by partial title or process name."""
+    if not query or not query.strip():
+        return False, "Window query cannot be empty."
+
+    windows = get_active_windows()
+    if not windows:
+        return False, "No active windows found to focus."
+
+    q = query.strip().lower()
+
+    # Special aliases:
+    # "unity" or "unity editor" should focus the main Unity Editor (Unity.exe) if running
+    if q in ("unity", "unity editor", "unity-editor"):
+        editor_wins = [w for w in windows if w["image"].lower() == "unity.exe" and not w["title"].endswith(".exe")]
+        if editor_wins:
+            matched = editor_wins[0]
+            pid = matched["pid"]
+            title = matched["title"]
+            import subprocess
+            ps_cmd = f"$w = New-Object -ComObject WScript.Shell; $w.AppActivate({pid})"
+            try:
+                subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, text=True, timeout=5)
+                return True, f"Successfully focused Unity Editor: '{title}' (PID: {pid})"
+            except Exception as e:
+                return False, f"Failed to focus Unity Editor: {e}"
+
+    # 1. Exact match on process name (without .exe) or title
+    matched = None
+    for w in windows:
+        img_base = w["image"].lower().replace(".exe", "")
+        if q == img_base or q == w["image"].lower() or q == w["title"].lower():
+            matched = w
+            break
+
+    if not matched:
+        # Prefer titles that do not look like raw exe paths
+        candidates = [w for w in windows if q in w["title"].lower()]
+        if candidates:
+            candidates.sort(key=lambda w: (1 if w["title"].endswith(".exe") else 0, len(w["title"])))
+            matched = candidates[0]
+
+    if not matched:
+        candidates = [w for w in windows if q in w["image"].lower()]
+        if candidates:
+            candidates.sort(key=lambda w: (1 if w["title"].endswith(".exe") else 0, -len(w["title"])))
+            matched = candidates[0]
+
+    if not matched:
+        return False, f"Could not find any open window matching '{query}'. Use list_windows to see available windows."
+
+    pid = matched["pid"]
+    title = matched["title"]
+
+    import subprocess
+    ps_cmd = f"$w = New-Object -ComObject WScript.Shell; $w.AppActivate({pid})"
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, text=True, timeout=5)
+        return True, f"Successfully focused '{title}' (Process: {matched['image']}, PID: {pid})"
+    except Exception as e:
+        return False, f"Failed to focus window PID {pid}: {e}"
+
+
