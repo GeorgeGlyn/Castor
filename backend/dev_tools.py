@@ -563,3 +563,55 @@ def focus_window(query: str) -> Tuple[bool, str]:
         return False, f"Failed to focus window PID {pid}: {e}"
 
 
+def check_unity_diagnostics(max_lines: int = 150) -> Tuple[bool, str]:
+    """Inspect Unity's Editor.log for C# compilation errors, script exceptions, and stack traces."""
+    import os
+    import re
+
+    log_path = os.path.expandvars(r"%LOCALAPPDATA%\Unity\Editor\Editor.log")
+    if not os.path.exists(log_path):
+        return False, "Unity Editor.log not found on this system (%LOCALAPPDATA%\\Unity\\Editor\\Editor.log)."
+
+    try:
+        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+
+        if not lines:
+            return True, "Unity Editor.log is empty."
+
+        recent = lines[-max_lines:]
+        error_patterns = [
+            re.compile(r"error CS\d+:", re.IGNORECASE),
+            re.compile(r".*Exception:.*", re.IGNORECASE),
+            re.compile(r"\(Filename: .* Line: \d+\)"),
+            re.compile(r"Compilation failed:.*", re.IGNORECASE),
+            re.compile(r"Asset Pipeline Refresh.*Failed", re.IGNORECASE),
+        ]
+
+        matched_blocks = []
+        seen_lines = set()
+
+        for i, line in enumerate(recent):
+            for pat in error_patterns:
+                if pat.search(line):
+                    # Grab surrounding context (1 line before, 4 lines after)
+                    start = max(0, i - 1)
+                    end = min(len(recent), i + 4)
+                    block_range = tuple(range(start, end))
+                    if not any(idx in seen_lines for idx in block_range):
+                        for idx in block_range:
+                            seen_lines.add(idx)
+                        snippet = "".join(recent[start:end]).rstrip()
+                        matched_blocks.append(snippet)
+                    break
+
+        if not matched_blocks:
+            return True, "✅ No compilation errors, exceptions, or asset pipeline failures detected in recent Unity logs."
+
+        header = f"⚠️ Detected {len(matched_blocks)} issue(s) in Unity Editor.log:\n" + ("=" * 60) + "\n"
+        return True, header + "\n\n---\n\n".join(matched_blocks)
+    except Exception as e:
+        return False, f"Failed to read Unity Editor.log: {e}"
+
+
+

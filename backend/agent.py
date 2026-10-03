@@ -139,7 +139,7 @@ class ReplacementChunkItem(BaseModel):
 
 
 class ActionParams(BaseModel):
-    action: str        # "click" | "drag" | "type" | "hotkey" | "scroll" | "bash" | "done" | "skill" | "run_skill_script" | "view_file" | "write_to_file" | "replace_file_content" | "multi_replace_file_content" | "list_dir" | "grep_search" | "search_web" | "read_url_content" | "list_windows" | "focus_window" | "ask_question" | "manage_task" | "save_knowledge" | "get_knowledge" | "invoke_subagent" | "create_artifact" | "update_artifact"
+    action: str        # "click" | "drag" | "type" | "hotkey" | "scroll" | "bash" | "done" | "skill" | "run_skill_script" | "view_file" | "write_to_file" | "replace_file_content" | "multi_replace_file_content" | "list_dir" | "grep_search" | "search_web" | "read_url_content" | "list_windows" | "focus_window" | "check_unity_diagnostics" | "ask_question" | "manage_task" | "save_knowledge" | "get_knowledge" | "invoke_subagent" | "create_artifact" | "update_artifact"
     target: Optional[str] = None       # Semantic description for click/drag/scroll, or skill name for run_skill_script
     destination: Optional[str] = None  # Semantic description for drag end
     text: Optional[str] = None         # For type / bash / skill name / script name / URL / query, OR full detailed report/answer for 'done'
@@ -688,6 +688,7 @@ class AgentLoop:
             "   - 'read_url_content': fetch live web page or markdown documentation directly. Set 'path' or 'text' to URL.\n"
             "   - 'list_windows': inspect all open desktop applications and window titles (e.g. Unity, Chrome, VS Code).\n"
             "   - 'focus_window': deterministically brings an application window to the foreground instantly by name or partial title (e.g. target='Unity', target='Chrome', target='VS Code'). PREFERRED over guessing taskbar clicks or Alt+Tab!\n"
+            "   - 'check_unity_diagnostics': inspect Unity's compiler and runtime log (Editor.log) to check for C# compile errors (CS0246, CS1002) or script exceptions (NullReferenceException, InvalidOperationException) with exact file and line numbers. Use after modifying Unity C# scripts to ensure zero errors!\n"
             "   - 'bash': PowerShell shell command in 'text'. Set 'is_background': true if starting a long-running dev server, build watcher, or daemon process!\n"
             "   - 'manage_task': manage background processes. Set 'task_action' ('status', 'logs', 'kill', 'list') and optional 'task_id' (e.g. 'task-1').\n"
             "   - 'save_knowledge': store architectural patterns, bug fixes, or gotchas into persistent memory. Set 'knowledge_title', 'knowledge_summary', 'content', and optional 'knowledge_tags'.\n"
@@ -1620,6 +1621,20 @@ class AgentLoop:
                         ))
                         # Brief pause for OS window manager z-order transition
                         await asyncio.sleep(0.5)
+
+                    # ── check_unity_diagnostics ──────────────────────────────
+                    elif action_type == "check_unity_diagnostics":
+                        await self.send_status("🔍 Checking Unity compiler diagnostics and runtime logs...")
+                        ok, res_text = await asyncio.to_thread(dev_tools.check_unity_diagnostics, 150)
+                        if "No compilation errors" in res_text:
+                            await self.send_status("✅ Unity compile check passed: zero errors.")
+                        else:
+                            await self.send_status("⚠️ Unity issues detected in Editor.log.")
+                        rolling_history.append(types.Content(
+                            role="user",
+                            parts=[types.Part(text=f"[UNITY DIAGNOSTICS RESULT]\n{res_text}")],
+                        ))
+                        await asyncio.sleep(0.2)
 
                     # ── type ─────────────────────────────────────────────────
                     elif action_type == "type":
