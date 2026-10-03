@@ -139,7 +139,7 @@ class ReplacementChunkItem(BaseModel):
 
 
 class ActionParams(BaseModel):
-    action: str        # "click" | "drag" | "type" | "hotkey" | "scroll" | "bash" | "done" | "skill" | "run_skill_script" | "view_file" | "write_to_file" | "replace_file_content" | "multi_replace_file_content" | "list_dir" | "grep_search" | "search_web" | "read_url_content" | "list_windows" | "focus_window" | "check_unity_diagnostics" | "ask_question" | "manage_task" | "save_knowledge" | "get_knowledge" | "invoke_subagent" | "create_artifact" | "update_artifact"
+    action: str        # "click" | "drag" | "type" | "hotkey" | "scroll" | "bash" | "done" | "skill" | "run_skill_script" | "view_file" | "write_to_file" | "replace_file_content" | "multi_replace_file_content" | "list_dir" | "grep_search" | "search_web" | "read_url_content" | "list_windows" | "focus_window" | "check_unity_diagnostics" | "schedule" | "ask_question" | "manage_task" | "save_knowledge" | "get_knowledge" | "invoke_subagent" | "create_artifact" | "update_artifact"
     target: Optional[str] = None       # Semantic description for click/drag/scroll, or skill name for run_skill_script
     destination: Optional[str] = None  # Semantic description for drag end
     text: Optional[str] = None         # For type / bash / skill name / script name / URL / query, OR full detailed report/answer for 'done'
@@ -151,6 +151,7 @@ class ActionParams(BaseModel):
     start_line: Optional[int] = None   # Starting line number for view_file
     end_line: Optional[int] = None     # Ending line number for view_file
     query: Optional[str] = None        # Search pattern/regex for grep_search or search_web
+    duration_seconds: Optional[int] = None # For schedule (seconds to wait for builds / domain reloads)
     # Antigravity Developer Tool Extensions:
     questions: Optional[list[QuestionOptionItem]] = None   # For ask_question
     replacements: Optional[list[ReplacementChunkItem]] = None # For multi_replace_file_content
@@ -689,6 +690,7 @@ class AgentLoop:
             "   - 'list_windows': inspect all open desktop applications and window titles (e.g. Unity, Chrome, VS Code).\n"
             "   - 'focus_window': deterministically brings an application window to the foreground instantly by name or partial title (e.g. target='Unity', target='Chrome', target='VS Code'). PREFERRED over guessing taskbar clicks or Alt+Tab!\n"
             "   - 'check_unity_diagnostics': inspect Unity's compiler and runtime log (Editor.log) to check for C# compile errors (CS0246, CS1002) or script exceptions (NullReferenceException, InvalidOperationException) with exact file and line numbers. Use after modifying Unity C# scripts to ensure zero errors!\n"
+            "   - 'schedule': cleanly pause agent execution for N seconds (e.g. duration_seconds=5 or 10, text='Waiting for Unity script compilation / domain reload') without wasting LLM turns or clicking while an app is busy or importing assets.\n"
             "   - 'bash': PowerShell shell command in 'text'. Set 'is_background': true if starting a long-running dev server, build watcher, or daemon process!\n"
             "   - 'manage_task': manage background processes. Set 'task_action' ('status', 'logs', 'kill', 'list') and optional 'task_id' (e.g. 'task-1').\n"
             "   - 'save_knowledge': store architectural patterns, bug fixes, or gotchas into persistent memory. Set 'knowledge_title', 'knowledge_summary', 'content', and optional 'knowledge_tags'.\n"
@@ -1633,6 +1635,23 @@ class AgentLoop:
                         rolling_history.append(types.Content(
                             role="user",
                             parts=[types.Part(text=f"[UNITY DIAGNOSTICS RESULT]\n{res_text}")],
+                        ))
+                        await asyncio.sleep(0.2)
+
+                    # ── schedule ─────────────────────────────────────────────
+                    elif action_type == "schedule":
+                        duration = action_param.duration_seconds or action_param.clicks or 5
+                        duration = max(1, min(120, int(duration)))
+                        reason = action_param.text or action_param.target or "Waiting for process/build"
+                        await self.send_status(f"⏳ Scheduling pause: {reason} ({duration}s)...")
+                        for remaining in range(duration, 0, -1):
+                            if remaining % 2 == 0 or remaining <= 3:
+                                await self.send_status(f"⏳ {reason} ({remaining}s remaining...)")
+                            await asyncio.sleep(1)
+                        await self.send_status(f"✅ Timer completed: {reason} ({duration}s).")
+                        rolling_history.append(types.Content(
+                            role="user",
+                            parts=[types.Part(text=f"[SCHEDULE TIMER COMPLETED]\nWaited {duration}s for: {reason}")],
                         ))
                         await asyncio.sleep(0.2)
 
