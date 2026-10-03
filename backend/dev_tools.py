@@ -614,4 +614,50 @@ def check_unity_diagnostics(max_lines: int = 150) -> Tuple[bool, str]:
         return False, f"Failed to read Unity Editor.log: {e}"
 
 
+def get_unity_executable() -> Optional[str]:
+    """Find the installed Unity.exe binary path."""
+    import glob
+    candidates = glob.glob(r"C:\Program Files\Unity\Hub\Editor\*\Editor\Unity.exe")
+    if candidates:
+        return candidates[0]
+    candidates_d = glob.glob(r"D:\Program Files\Unity\Hub\Editor\*\Editor\Unity.exe")
+    if candidates_d:
+        return candidates_d[0]
+    return None
+
+
+def auto_detect_project_path() -> Optional[str]:
+    """Auto-detect the active Unity/game project directory from running instances or disk."""
+    import re
+    # 1. Check open Unity editor window title
+    windows = get_active_windows()
+    for w in windows:
+        if w["image"].lower() == "unity.exe":
+            m = re.search(r'(?:Administrator:\s*)?([A-Za-z0-9_-]+)\s*-\s*', w["title"])
+            if m:
+                proj_name = m.group(1).strip()
+                candidates = [
+                    os.path.join(r"D:\CastorProjects", proj_name),
+                    os.path.join(os.path.expanduser("~"), "Unity Projects", proj_name),
+                    os.path.join(r"C:\UnityProjects", proj_name),
+                ]
+                for c in candidates:
+                    if os.path.exists(c) and os.path.isdir(c):
+                        return os.path.normpath(c)
+
+    # 2. Check D:\CastorProjects for most recently modified project
+    if os.path.exists(r"D:\CastorProjects"):
+        try:
+            subdirs = [os.path.join(r"D:\CastorProjects", d) for d in os.listdir(r"D:\CastorProjects")]
+            valid = [d for d in subdirs if os.path.isdir(d) and os.path.exists(os.path.join(d, "Assets"))]
+            if valid:
+                valid.sort(key=lambda d: os.path.getmtime(d), reverse=True)
+                return os.path.normpath(valid[0])
+        except Exception:
+            pass
+
+    return None
+
+
+
 

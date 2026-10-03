@@ -551,6 +551,11 @@ class AgentLoop:
         history: list[dict] | None = None,
     ):
         self.current_project_path = project_path
+        if not self.current_project_path:
+            detected = dev_tools.auto_detect_project_path()
+            if detected:
+                self.current_project_path = detected
+                await self.send_status(f"🎯 Auto-detected active project: {os.path.basename(detected)} ({detected})")
         # ── Re-read .env fresh on every run so changes take effect immediately ──
         from dotenv import load_dotenv
         load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"), override=True)
