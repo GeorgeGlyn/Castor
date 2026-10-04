@@ -149,5 +149,79 @@ class GeminiClientPool:
         raise last_err
 
 
+    def generate_image(
+        self,
+        prompt: str,
+        primary_model: str = "nano-banana-pro-preview",
+        fallback_models: Optional[List[str]] = None,
+        max_retries_per_model: int = 1,
+    ) -> tuple[bool, Optional[bytes], str]:
+        """
+        Generate image bytes via Google Gemini image models (Nano Banana / Flash Image).
+        Cascades across configured keys and image-capable models.
+        Returns: (success, image_bytes, status_message)
+        """
+        if fallback_models is None:
+            fallback_models = [
+                "gemini-3.1-flash-lite-image",
+                "gemini-2.5-flash-image",
+                "gemini-3.1-flash-image",
+                "gemini-3-pro-image",
+            ]
+
+        models_to_try = [primary_model] + [m for m in fallback_models if m != primary_model]
+        last_err = None
+
+        if not self.api_keys:
+            self.reload_keys()
+        if not self.api_keys:
+            return False, None, "No GEMINI_API_KEY configured."
+
+        config = types.GenerateContentConfig(response_modalities=["IMAGE", "TEXT"])
+
+        for model in models_to_try:
+            for attempt in range(max_retries_per_model):
+                client, active_key = self.get_active_client_and_key()
+                if not client:
+                    return False, None, "No active Gemini client available."
+
+                try:
+                    res = client.models.generate_content(
+                        model=model,
+                        contents=prompt,
+                        config=config,
+                    )
+                    # Extract image data from parts
+                    if res.candidates and res.candidates[0].content and res.candidates[0].content.parts:
+                        for part in res.candidates[0].content.parts:
+                            if hasattr(part, "inline_data") and part.inline_data and part.inline_data.data:
+                                return True, part.inline_data.data, f"Generated image with model '{model}'"
+                    return False, None, f"Model '{model}' returned response with no image parts."
+                except Exception as e:
+                    last_err = e
+                    err_str = str(e)
+                    is_rate_limit = (
+                        "429" in err_str
+                        or "RESOURCE_EXHAUSTED" in err_str
+                        or "quota" in err_str.lower()
+                    )
+                    is_transient = is_rate_limit or "503" in err_str or "UNAVAILABLE" in err_str
+
+                    if is_rate_limit and active_key:
+                        self.mark_key_exhausted(active_key, cooldown_seconds=60.0)
+                        if len(self.api_keys) > 1:
+                            print(f"[Castor Pool] Key {active_key[:10]}... image quota exhausted. Rotating key.")
+                            continue
+
+                    if is_transient and attempt < max_retries_per_model - 1:
+                        time.sleep(1.0)
+                        continue
+
+                    break
+
+        return False, None, f"AI image generation failed across all models/keys: {last_err}"
+
+
 # Global singleton instance
 gemini_pool = GeminiClientPool()
+

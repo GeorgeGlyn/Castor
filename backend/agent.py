@@ -175,14 +175,17 @@ class ActionParams(BaseModel):
     artifact_id: Optional[str] = None                     # For update_artifact (e.g. "arch_plan")
     artifact_title: Optional[str] = None                  # For create_artifact
     artifact_type: Optional[str] = None                   # "markdown" | "code" | "diagram" | "diff"
-    # Universal Graphic Asset Generator:
-    asset_type: Optional[str] = None                      # "icon" | "pixel_sprite" | "texture" | "badge" | "gradient" | "svg"
+    # Universal Graphic Asset Generator (Nano Banana AI & Python Deterministic):
+    asset_type: Optional[str] = None                      # "icon" | "pixel_sprite" | "texture" | "badge" | "gradient" | "svg" | "ai"
+    image_mode: Optional[str] = None                      # "ai" (Nano Banana / Flash Image) | "python" (Pillow/SVG) | "ask" (prompt user modal)
+    prompt: Optional[str] = None                          # Prompt for AI image generation (e.g. "modern vibrant app logo")
     width: Optional[int] = None                           # Image width in px (default 64)
     height: Optional[int] = None                          # Image height in px (default 64)
     label: Optional[str] = None                           # Text or letter label (e.g. "A", "Play", "Mario")
     primary_color: Optional[str] = None                   # Hex color (e.g. "#4285F4")
     secondary_color: Optional[str] = None                 # Hex color (e.g. "#34A853")
     preset: Optional[str] = None                          # Preset name (e.g. "mario", "goomba", "coin", "brick")
+
 
 
 class PlannerResponse(BaseModel):
@@ -690,7 +693,7 @@ class AgentLoop:
             "   - 'create_checkpoint': create a zero-risk workspace safety snapshot before major multi-file refactors or terminal scripts. Set 'checkpoint_desc' or 'text'.\n"
             "   - 'restore_checkpoint': cleanly roll back workspace to a previous checkpoint if code generation fails or tests break. Set 'checkpoint_id' (or 'latest').\n"
             "   - 'list_checkpoints': view all available safety checkpoints in this workspace.\n"
-            "   - 'generate_image_asset': create clean visual assets (PNG or SVG) for any project—app icons, favicons, logos, badges, UI buttons, pixel sprites (mario, enemy, coin, block), and textures. Set 'path', 'asset_type' ('icon' | 'pixel_sprite' | 'texture' | 'badge' | 'gradient' | 'svg'), 'width', 'height', and optional 'preset'/'label'.\n"
+            "   - 'generate_image_asset': create clean visual assets for any project (PNG or SVG). Supports dual-mode generation: 'image_mode' ('ai' for Google Nano Banana / Gemini image generation with prompt, 'python' for zero-quota local Pillow/SVG generation, or 'ask' to display an interactive modal asking the user's preference). Set 'path', 'prompt' (for AI), 'asset_type' ('icon' | 'pixel_sprite' | 'texture' | 'badge' | 'gradient' | 'svg'), 'width', 'height', and optional 'preset'/'label'. If AI quota is exhausted, it automatically falls back to local Python generation!\n"
             "   - 'run_tests': execute automated tests or build verification for ANY project type (Python, JavaScript/TypeScript, Go, Rust, C#/.NET) with automatic framework detection or custom 'test_command'. Use to verify that code changes work with zero regressions!\n\n"
             "   [Skill System & Executables]\n"
             "   - 'skill': activate a domain skill into your persistent system instructions. Set 'text' to skill name (e.g. 'unity', 'windows-power').\n"
@@ -1717,23 +1720,71 @@ class AgentLoop:
                         p_col = action_param.primary_color or "#4285F4"
                         s_col = action_param.secondary_color or "#34A853"
                         pres = action_param.preset
+                        gen_mode = (action_param.image_mode or "").strip().lower()
+                        ai_prompt = action_param.prompt or lbl or f"A high-quality {a_type} graphic asset: {pres or 'modern UI icon'}"
+
+                        # If mode is 'ask' or unspecified and visual asset is requested, query the user via interactive modal
+                        if gen_mode == "ask":
+                            await self.send_status("❓ Asking user for image generation preference...")
+                            self.question_event.clear()
+                            self.user_answers = []
+                            await self.websocket.send_json({
+                                "type": "ask_question",
+                                "questions": [{
+                                    "question": f"How would you like to generate the image asset '{os.path.basename(f_path)}'?",
+                                    "options": [
+                                        "Use Gemini Nano Banana AI Model (Requires AI quota / billing)",
+                                        "Use local Python Pillow (Zero quota, instant & offline)",
+                                    ],
+                                    "is_multi_select": False,
+                                }],
+                            })
+                            await self.question_event.wait()
+                            chosen = ""
+                            if self.user_answers and isinstance(self.user_answers, list):
+                                ans_item = self.user_answers[0]
+                                chosen = ans_item.get("answer", "") if isinstance(ans_item, dict) else str(ans_item)
+                            if "Nano Banana" in chosen or "AI Model" in chosen:
+                                gen_mode = "ai"
+                            else:
+                                gen_mode = "python"
+                            await self.send_status(f"🎯 Selected mode: {gen_mode.upper()}")
+
                         if hitl_enabled:
-                            approved = await self.request_hitl_approval(f"GENERATE_IMAGE: {f_path} ({a_type}, {w}x{h})")
+                            approved = await self.request_hitl_approval(f"GENERATE_IMAGE: {f_path} ({gen_mode or 'auto'}, {w}x{h})")
                             if not approved:
                                 break
-                        await self.send_status(f"🎨 Generating {a_type} graphic: {f_path} ({w}x{h})...")
-                        ok, res_text = await asyncio.to_thread(
-                            dev_tools.generate_image_asset,
-                            f_path,
-                            a_type,
-                            w,
-                            h,
-                            lbl,
-                            p_col,
-                            s_col,
-                            pres,
-                            self.current_project_path,
-                        )
+
+                        ok = False
+                        res_text = ""
+                        # Attempt AI generation if requested
+                        if gen_mode == "ai":
+                            await self.send_status(f"🍌 Generating AI asset via Nano Banana: '{ai_prompt[:40]}'...")
+                            ok, res_text = await asyncio.to_thread(
+                                dev_tools.generate_ai_image,
+                                f_path,
+                                ai_prompt,
+                                self.current_project_path,
+                            )
+                            if not ok:
+                                await self.send_status(f"⚠️ Nano Banana AI quota exhausted/unavailable ({res_text}). Falling back to local Python generation...")
+
+                        # Fallback to local Python generation if AI generation wasn't requested or failed
+                        if not ok:
+                            await self.send_status(f"🎨 Generating {a_type} graphic locally with Python: {f_path} ({w}x{h})...")
+                            ok, res_text = await asyncio.to_thread(
+                                dev_tools.generate_image_asset,
+                                f_path,
+                                a_type,
+                                w,
+                                h,
+                                lbl,
+                                p_col,
+                                s_col,
+                                pres,
+                                self.current_project_path,
+                            )
+
                         if ok:
                             await self.send_status(f"✅ {res_text}")
                         else:
@@ -1743,6 +1794,7 @@ class AgentLoop:
                             parts=[types.Part(text=f"[GENERATE_IMAGE_ASSET RESULT]\n{res_text}")],
                         ))
                         await asyncio.sleep(0.2)
+
 
                     # ── run_tests ────────────────────────────────────────────
                     elif action_type == "run_tests":

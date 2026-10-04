@@ -797,7 +797,40 @@ def generate_image_asset(
         return False, f"Failed to generate image asset: {e}"
 
 
+def generate_ai_image(
+    path: str,
+    prompt: str,
+    cwd: Optional[str] = None,
+) -> Tuple[bool, str]:
+    """
+    Generate an image using Google Gemini AI image generation models (Nano Banana / Flash Image).
+    Saves the received PNG/JPEG bytes to the specified path.
+    """
+    try:
+        from gemini_pool import gemini_pool
+    except ImportError:
+        try:
+            from .gemini_pool import gemini_pool
+        except ImportError:
+            return False, "Could not import gemini_pool."
+
+    target = resolve_path(path, cwd)
+    os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+
+    ok, img_bytes, msg = gemini_pool.generate_image(prompt)
+    if not ok or not img_bytes:
+        return False, f"AI image generation failed: {msg}"
+
+    try:
+        with open(target, "wb") as f:
+            f.write(img_bytes)
+        return True, f"Successfully generated AI image ({len(img_bytes)} bytes) via Nano Banana at '{target}'"
+    except Exception as e:
+        return False, f"Failed to save AI image to '{target}': {e}"
+
+
 def run_tests(
+
     test_command: Optional[str] = None,
     cwd: Optional[str] = None,
 ) -> Tuple[bool, str]:
