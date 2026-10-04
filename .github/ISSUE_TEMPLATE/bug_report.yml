@@ -1,0 +1,44 @@
+name: Bug report
+description: Create a report to help us improve Castor
+title: "[BUG]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report an issue with Castor AI!
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Also tell us what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction-steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide step-by-step instructions or goals given to Castor.
+      placeholder: |
+        1. Start Castor via 'npm run dev'
+        2. Prompt the agent: "..."
+        3. See error
+    validations:
+      required: true
+  - type: input
+    id: os-details
+    attributes:
+      label: Operating System & Version
+      placeholder: Windows 11 / macOS Sonoma / Ubuntu 22.04
+    validations:
+      required: true
+  - type: input
+    id: gemini-model
+    attributes:
+      label: Gemini Models Used
+      placeholder: gemini-flash-lite-latest / nano-banana-pro-preview
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Log Output or Console Errors
+      render: shell

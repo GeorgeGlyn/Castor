@@ -1,110 +1,122 @@
-# Castor AI Assistant
+# Castor AI Assistant 🦫
 
-Castor is a 2026 state-of-the-art **Dual-Agent Desktop Assistant**. It uses a React/Electron frontend and a Python FastAPI backend to autonomously observe your screen and act on your goals using Gemini models.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Powered by Gemini](https://img.shields.io/badge/Powered%20by-Google%20Gemini-blue)](https://ai.google.dev/)
+[![Electron](https://img.shields.io/badge/Desktop-Electron%20%2B%20React-teal)](https://www.electronjs.org/)
 
-## Architecture: The Dual-Agent Loop
+Castor is an autonomous, open-source **Dual-Agent Desktop & Coding Assistant**. It pairs a high-level multimodal reasoning Planner with a precise screen Grounder, combined with a suite of deterministic developer tools, multi-key resilience, living artifacts, and workspace safety checkpoints.
 
-The core spatial reasoning pipeline decouples semantic planning from coordinate resolution:
+---
 
-1. **🧠 Planner** (`gemini-2.5-pro`): Analyses a downscaled screenshot (max 720p / ~1.15 MP) and outputs a structured `thought_process` + scratchpad + batched action list.
-2. **🎯 Grounder** (`gemini-2.5-flash`): Receives the Planner's semantic target description and the screenshot, returns exact **pixel coordinates relative to the scaled image** and a bounding box.
-3. **📐 Coordinate Upscaling**: The backend mathematically maps the Grounder's pixel coords back to physical screen resolution via `scale_factor` before executing.
-4. **✅ State Diffing**: After every action, Castor waits, captures a new screenshot, and computes the mean pixel diff. If the screen hasn't changed, the Planner is notified to retry with a different approach.
-5. **🛡️ Safety Guards**: Max 30 steps, max 3 consecutive diff failures, bash output truncation.
+## 🌟 Key Capabilities
 
-## Features
+- **🧠 Dual-Agent Spatial Engine**: Decouples semantic reasoning (`gemini-2.5-pro` or `flash-lite`) from coordinate grounding (`gemini-2.5-flash`), delivering pixel-perfect desktop automation.
+- **🛡️ Workspace Safety Checkpoints**: Create zero-risk snapshots and perform instant rollbacks before major refactors, multi-file code modifications, or terminal commands.
+- **🎨 Dual-Mode Visual Generation**: Generates application icons, favicons, badges, sprites, and textures using Google Gemini **Nano Banana** AI models with zero-quota fallback to local Python Pillow/SVG.
+- **🔄 Multi-Key & Multi-Model Pool**: Infinite quota resilience with automatic key rotation and model cascading on `429 RESOURCE_EXHAUSTED`.
+- **📜 Antigravity Living Artifacts**: Real-time sidecar documents (walkthroughs, plans, design specs, diff views) stored in `.castor/artifacts/`.
+- **🧪 Universal Test Runner**: Auto-detects and verifies tests across JavaScript/TypeScript (`npm test`), Python (`pytest`/`unittest`), Go (`go test`), Rust (`cargo test`), and .NET (`dotnet test`).
+- **❓ Interactive Question Modals (`ask_question`)**: Solicits design clarification or picks technical options via non-blocking UI modals.
+- **🧩 Extensible Domain Skills**: Modular YAML/Python skill packs for Unity 2D/3D development, Windows automation, web development, and more.
 
-| Feature | Description |
-|---|---|
-| **Dual-Agent (Planner + Grounder)** | Separates semantic reasoning from coordinate grounding |
-| **Long-Horizon Scratchpad** | Persistent goal/subtask/completed-steps memory across loop iterations |
-| **Batched Actions** | Planner can emit multiple actions per turn to reduce round-trips |
-| **Human-in-the-Loop (HitL)** | Toggle in the UI to approve every action before execution |
-| **Hardware Kill Switch** | `Ctrl+Shift+Esc` globally aborts the loop and kills the backend |
-| **Micro-Target Fallback** | Elements < 15×15px use Tab key navigation instead of fragile clicks |
-| **Unicode Typing** | Uses clipboard paste (`pyperclip`) instead of `pyautogui.write()` for full Unicode support |
-| **Scroll Grounding** | Scroll target is grounded to coordinates, not just executed at cursor position |
-| **State-Diff Verification** | Screen change detection prevents silent action failures |
-| **Max Iterations Guard** | Hard cap on steps prevents infinite loops |
-| **Rolling History Window** | Keeps only the last N conversation turns to prevent context overflow |
-| **Overlay Window** | Click-through transparent overlay shows the agent's target bounding box |
-| **Exponential Backoff** | WebSocket reconnect uses exponential backoff with jitter |
-| **`/health` Endpoint** | Reliable backend readiness check (replaces polling `/docs`) |
+---
 
-## Prerequisites
+## 📐 Architecture: The Dual-Agent Loop
 
-- Node.js 18+
-- Python 3.11+
-- Gemini API Key from [Google AI Studio](https://aistudio.google.com/)
+```mermaid
+graph TD
+    User([User Goal]) --> Agent[Castor Agent Loop]
+    Agent --> Screen[Capture Downscaled Screenshot]
+    Screen --> Planner[Planner Model: Gemini Pro / Flash]
+    Planner --> Actions{Action Type}
+    
+    Actions -->|GUI Click/Drag| Grounder[Grounder Model: Gemini Flash]
+    Grounder --> Upscale[Upscale Coords to Native DPI]
+    Upscale --> ExecGUI[Execute PyAutoGUI Click/Drag]
+    
+    Actions -->|Code & Files| DevTools[Deterministic Dev Tools]
+    DevTools --> Diff[Generate Unified Git Diff]
+    
+    Actions -->|Asset Gen| DualGen[AI Nano Banana or Python Pillow]
+    Actions -->|Interactive Prompt| Modal[Ask Question Modal]
+    
+    ExecGUI --> DiffCheck[Screen Pixel Diff Verification]
+    DiffCheck -->|Screen Changed| Next[Next Step]
+    DiffCheck -->|No Change| Retry[Notify Planner to Retry]
+```
 
-## Setup Instructions
+---
 
-### 1. Backend Setup
+## 🚀 Quick Start
+
+### Prerequisites
+- [Node.js](https://nodejs.org/) v18+
+- [Python](https://www.python.org/) 3.10+
+- Google Gemini API Key from [Google AI Studio](https://aistudio.google.com/)
+
+### 1. Clone & Set Up Backend
 
 ```bash
-cd backend
+git clone https://github.com/your-username/Castor.git
+cd Castor/backend
 
-# Create and activate virtual environment
+# Create virtual environment
 python -m venv .venv
-.venv\Scripts\activate          # Windows
-# source .venv/bin/activate     # macOS / Linux
+
+# Activate virtual environment
+# Windows:
+.venv\Scripts\activate
+# Linux/macOS:
+source .venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Configure environment
+# Configure your environment
 cp .env.example .env
-# Edit .env and set your GEMINI_API_KEY
 ```
+Open `backend/.env` and add your `GEMINI_API_KEY`. You can also configure multiple comma-separated keys for auto-failover (`GEMINI_API_KEYS=key1,key2,key3`).
 
-### 2. Frontend Setup
+### 2. Set Up Frontend & Run
 
 ```bash
-cd frontend
+cd ../frontend
 npm install
-```
-
-### 3. Running Castor (Development)
-
-From the `frontend` directory:
-
-```bash
 npm run dev
 ```
 
-This command:
-1. Starts the Vite dev server on `http://localhost:5173`
-2. Launches the Electron app (waits for Vite to be ready)
-3. Electron automatically locates `backend/.venv` and spawns the FastAPI server on port `8000`
+This starts the Vite web server on `http://localhost:5173` and boots Electron, which automatically connects to the FastAPI backend on port `8000`.
 
-> **macOS Note:** On first run, grant Screen Recording and Accessibility permissions in System Settings → Privacy & Security.
+---
 
-### 4. Environment Variables
+## ⚙️ Configuration (.env)
 
 | Variable | Default | Description |
 |---|---|---|
-| `GEMINI_API_KEY` | *(required)* | Your Gemini API key |
-| `PLANNER_MODEL` | `gemini-2.5-pro` | Model for high-level planning |
-| `GROUNDER_MODEL` | `gemini-2.5-flash` | Model for coordinate grounding |
-| `SCREEN_DIFF_THRESHOLD` | `1.0` | Mean pixel diff below this = action failed |
-| `MAX_STEPS` | `30` | Max planner iterations before auto-abort |
-| `HISTORY_WINDOW` | `10` | Planner conversation turns to keep in context |
-| `MAX_DIFF_RETRIES` | `3` | Consecutive failures before aborting |
-| `BASH_TIMEOUT` | `15.0` | Shell command timeout (seconds) |
-| `BASH_MAX_OUTPUT` | `2000` | Max chars of bash output fed back to model |
+| `GEMINI_API_KEY` | *(required)* | Primary Gemini API Key |
+| `GEMINI_API_KEYS` | *(optional)* | Comma-separated backup keys for automatic 429 rotation |
+| `PLANNER_MODEL` | `gemini-flash-lite-latest` | Model for planning & tool execution |
+| `GROUNDER_MODEL` | `gemini-flash-lite-latest` | Model for UI coordinate localization |
+| `SCREEN_DIFF_THRESHOLD`| `1.0` | Threshold below which an action is flagged as unchanged |
+| `MAX_STEPS` | `30` | Max planner iterations before automatic self-termination |
+| `BASH_TIMEOUT` | `60.0` | Timeout in seconds for background terminal commands |
 
-## Safety
+---
 
-- **`pyautogui.FAILSAFE = True`** — Moving mouse to screen corner instantly raises an exception, stopping the agent.
-- **Kill Switch** — `Ctrl+Shift+Esc` sends abort over WebSocket and kills the Python process after 1 second if it doesn't respond.
-- **HitL Mode** — Every action is gated on your approval before any mouse/keyboard movement occurs.
-- **Max Iterations** — The loop hard-stops after `MAX_STEPS` to prevent runaway execution.
+## 🛡️ Safety & Failsafes
 
-## Production Build
+- **Hardware Kill Switch**: Press `Ctrl+Shift+Esc` anytime to instantly abort agent execution and sever backend communication.
+- **PyAutoGUI Failsafe**: Slam the mouse cursor into any corner of the primary screen to immediately halt pointer execution.
+- **Human-in-the-Loop (HitL)**: Toggle HitL mode in the UI header to require manual user approval before any file writes, bash commands, or mouse clicks.
 
-```bash
-cd frontend
-npm run build
-```
+---
 
-*(Use [electron-builder](https://www.electron.build/) for packaging into a distributable executable.)*
+## 🤝 Contributing
+
+We welcome community contributions! Please review [CONTRIBUTING.md](CONTRIBUTING.md) for local development workflows, code standards, and PR submission guidelines.
+
+---
+
+## 📄 License
+
+This project is licensed under the [MIT License](LICENSE).
