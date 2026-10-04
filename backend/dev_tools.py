@@ -659,5 +659,144 @@ def auto_detect_project_path() -> Optional[str]:
     return None
 
 
+def generate_image_asset(
+    path: str,
+    asset_type: str = "icon",
+    width: int = 64,
+    height: int = 64,
+    label: Optional[str] = None,
+    primary_color: str = "#4285F4",
+    secondary_color: str = "#34A853",
+    preset: Optional[str] = None,
+    cwd: Optional[str] = None,
+) -> Tuple[bool, str]:
+    """
+    Generate universal visual assets (icons, favicons, logos, badges, sprites, textures)
+    in PNG or SVG format for web apps, mobile apps, desktop apps, or games.
+    """
+    import math
+    from PIL import Image, ImageDraw
+
+    def parse_color(c: str) -> tuple:
+        c = c.strip().lstrip("#")
+        if len(c) == 3:
+            c = "".join([x * 2 for x in c])
+        if len(c) == 6:
+            return (int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16), 255)
+        elif len(c) == 8:
+            return (int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16), int(c[6:8], 16))
+        return (66, 133, 244, 255)
+
+    target = resolve_path(path, cwd)
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+
+    w = max(8, min(2048, int(width)))
+    h = max(8, min(2048, int(height)))
+    p_col = parse_color(primary_color)
+    s_col = parse_color(secondary_color)
+    a_type = asset_type.lower().strip()
+    preset_name = (preset or label or "").lower().strip()
+
+    try:
+        # ── SVG Vector Output ────────────────────────────────────────────────
+        if target.endswith(".svg") or a_type == "svg":
+            svg_content = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="{primary_color}" />
+      <stop offset="100%" stop-color="{secondary_color}" />
+    </linearGradient>
+  </defs>
+  <rect width="{w}" height="{h}" rx="{w // 6}" fill="url(#grad)" />
+  <text x="50%" y="54%" font-family="system-ui, sans-serif" font-size="{w // 2.5}" font-weight="bold" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">{label or 'A'}</text>
+</svg>"""
+            with open(target, "w", encoding="utf-8") as f:
+                f.write(svg_content)
+            return True, f"Generated SVG vector asset ({w}x{h}) at '{target}'"
+
+        # ── Raster PNG Output ────────────────────────────────────────────────
+        img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+
+        if a_type in ("pixel_sprite", "sprite"):
+            # Retro pixel art generation
+            pixels = img.load()
+            if "mario" in preset_name or "player" in preset_name:
+                R, B, S = (220, 40, 40, 255), (40, 80, 220, 255), (255, 205, 148, 255)
+                for x in range(w // 4, (w * 3) // 4):
+                    for y in range(h // 8, h // 4): pixels[x, y] = R
+                for x in range(w // 4, (w * 3) // 4):
+                    for y in range(h // 4, h // 2): pixels[x, y] = S
+                for x in range(w // 6, (w * 5) // 6):
+                    for y in range(h // 2, (h * 3) // 4): pixels[x, y] = R
+                for x in range(w // 4, (w * 3) // 4):
+                    for y in range((h * 3) // 4, (h * 7) // 8): pixels[x, y] = B
+                for x in range(w // 6, w // 3): pixels[x, h - 2] = (100, 50, 20, 255)
+                for x in range((w * 2) // 3, (w * 5) // 6): pixels[x, h - 2] = (100, 50, 20, 255)
+            elif "coin" in preset_name:
+                draw.ellipse([w // 6, h // 8, (w * 5) // 6, (h * 7) // 8], fill=(255, 215, 0, 255), outline=(218, 165, 32, 255), width=max(1, w // 16))
+                draw.ellipse([w // 3, h // 4, (w * 2) // 3, (h * 3) // 4], outline=(255, 235, 100, 255), width=max(1, w // 20))
+            elif "goomba" in preset_name or "enemy" in preset_name:
+                BR, CR = (160, 82, 45, 255), (245, 222, 179, 255)
+                draw.ellipse([w // 8, h // 8, (w * 7) // 8, (h * 5) // 8], fill=BR)
+                draw.ellipse([w // 4, h // 2, (w * 3) // 4, (h * 7) // 8], fill=CR)
+                draw.rectangle([w // 6, h - max(2, h // 6), w // 3, h - 1], fill=(40, 40, 40, 255))
+                draw.rectangle([(w * 2) // 3, h - max(2, h // 6), (w * 5) // 6, h - 1], fill=(40, 40, 40, 255))
+            elif "block" in preset_name or "question" in preset_name:
+                draw.rectangle([1, 1, w - 2, h - 2], fill=(255, 165, 0, 255), outline=(180, 100, 0, 255), width=max(1, w // 16))
+                for pt in [(3, 3), (w - 5, 3), (3, h - 5), (w - 5, h - 5)]:
+                    draw.rectangle([pt[0], pt[1], pt[0] + 1, pt[1] + 1], fill=(120, 60, 0, 255))
+                draw.text((w // 3, h // 4), "?", fill=(255, 255, 255, 255))
+            else:
+                draw.rounded_rectangle([2, 2, w - 3, h - 3], radius=max(2, w // 8), fill=p_col, outline=s_col, width=max(1, w // 16))
+
+        elif a_type in ("texture", "tile"):
+            # Seamless tile pattern
+            draw.rectangle([0, 0, w, h], fill=p_col)
+            if "brick" in preset_name:
+                mortar = (200, 200, 200, 255)
+                row_h = max(4, h // 4)
+                for y in range(0, h, row_h):
+                    draw.line([(0, y), (w, y)], fill=mortar, width=1)
+                    offset = (w // 4) if (y // row_h) % 2 == 1 else 0
+                    for x in range(offset, w + (w // 2), w // 2):
+                        draw.line([(x % w, y), (x % w, y + row_h)], fill=mortar, width=1)
+            elif "grid" in preset_name:
+                step = max(4, w // 8)
+                for x in range(0, w, step): draw.line([(x, 0), (x, h)], fill=s_col, width=1)
+                for y in range(0, h, step): draw.line([(0, y), (w, y)], fill=s_col, width=1)
+            else:
+                draw.rectangle([0, 0, w, max(2, h // 4)], fill=s_col)
+
+        elif a_type in ("gradient", "banner"):
+            # 2-stop vertical gradient
+            for y in range(h):
+                t = y / max(1, h - 1)
+                r = int(p_col[0] * (1 - t) + s_col[0] * t)
+                g = int(p_col[1] * (1 - t) + s_col[1] * t)
+                b = int(p_col[2] * (1 - t) + s_col[2] * t)
+                draw.line([(0, y), (w, y)], fill=(r, g, b, 255))
+
+        elif a_type in ("badge", "button"):
+            # Modern UI pill / button
+            radius = min(w, h) // 2
+            draw.rounded_rectangle([2, 2, w - 3, h - 3], radius=radius, fill=p_col, outline=s_col, width=2)
+            if label:
+                draw.text((w // 4, h // 3), label[:8], fill=(255, 255, 255, 255))
+
+        else:
+            # Default app icon / favicon: smooth rounded squircle
+            radius = max(4, w // 5)
+            draw.rounded_rectangle([2, 2, w - 3, h - 3], radius=radius, fill=p_col, outline=s_col, width=max(1, w // 20))
+            text_str = (label or "A")[:2]
+            draw.text((w // 3, h // 3), text_str, fill=(255, 255, 255, 255))
+
+        img.save(target, format="PNG")
+        return True, f"Successfully generated {asset_type} ({w}x{h}) at '{target}'"
+    except Exception as e:
+        return False, f"Failed to generate image asset: {e}"
+
+
+
 
 

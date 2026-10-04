@@ -143,7 +143,7 @@ class ReplacementChunkItem(BaseModel):
 
 
 class ActionParams(BaseModel):
-    action: str        # "click" | "drag" | "type" | "hotkey" | "scroll" | "bash" | "done" | "skill" | "run_skill_script" | "view_file" | "write_to_file" | "replace_file_content" | "multi_replace_file_content" | "list_dir" | "grep_search" | "search_web" | "read_url_content" | "list_windows" | "focus_window" | "check_unity_diagnostics" | "schedule" | "create_checkpoint" | "restore_checkpoint" | "list_checkpoints" | "ask_question" | "manage_task" | "save_knowledge" | "get_knowledge" | "invoke_subagent" | "create_artifact" | "update_artifact"
+    action: str        # "click" | "drag" | "type" | "hotkey" | "scroll" | "bash" | "done" | "skill" | "run_skill_script" | "view_file" | "write_to_file" | "replace_file_content" | "multi_replace_file_content" | "list_dir" | "grep_search" | "search_web" | "read_url_content" | "list_windows" | "focus_window" | "check_unity_diagnostics" | "schedule" | "create_checkpoint" | "restore_checkpoint" | "list_checkpoints" | "generate_image_asset" | "ask_question" | "manage_task" | "save_knowledge" | "get_knowledge" | "invoke_subagent" | "create_artifact" | "update_artifact"
     target: Optional[str] = None       # Semantic description for click/drag/scroll, or skill name for run_skill_script
     destination: Optional[str] = None  # Semantic description for drag end
     text: Optional[str] = None         # For type / bash / skill name / script name / URL / query, OR full detailed report/answer for 'done'
@@ -174,6 +174,14 @@ class ActionParams(BaseModel):
     artifact_id: Optional[str] = None                     # For update_artifact (e.g. "arch_plan")
     artifact_title: Optional[str] = None                  # For create_artifact
     artifact_type: Optional[str] = None                   # "markdown" | "code" | "diagram" | "diff"
+    # Universal Graphic Asset Generator:
+    asset_type: Optional[str] = None                      # "icon" | "pixel_sprite" | "texture" | "badge" | "gradient" | "svg"
+    width: Optional[int] = None                           # Image width in px (default 64)
+    height: Optional[int] = None                          # Image height in px (default 64)
+    label: Optional[str] = None                           # Text or letter label (e.g. "A", "Play", "Mario")
+    primary_color: Optional[str] = None                   # Hex color (e.g. "#4285F4")
+    secondary_color: Optional[str] = None                 # Hex color (e.g. "#34A853")
+    preset: Optional[str] = None                          # Preset name (e.g. "mario", "goomba", "coin", "brick")
 
 
 class PlannerResponse(BaseModel):
@@ -680,7 +688,8 @@ class AgentLoop:
             "   - 'update_artifact': update an existing living document. Set 'artifact_id' and 'content'.\n"
             "   - 'create_checkpoint': create a zero-risk workspace safety snapshot before major multi-file refactors or terminal scripts. Set 'checkpoint_desc' or 'text'.\n"
             "   - 'restore_checkpoint': cleanly roll back workspace to a previous checkpoint if code generation fails or tests break. Set 'checkpoint_id' (or 'latest').\n"
-            "   - 'list_checkpoints': view all available safety checkpoints in this workspace.\n\n"
+            "   - 'list_checkpoints': view all available safety checkpoints in this workspace.\n"
+            "   - 'generate_image_asset': create clean visual assets (PNG or SVG) for any project—app icons, favicons, logos, badges, UI buttons, pixel sprites (mario, enemy, coin, block), and textures. Set 'path', 'asset_type' ('icon' | 'pixel_sprite' | 'texture' | 'badge' | 'gradient' | 'svg'), 'width', 'height', and optional 'preset'/'label'.\n\n"
             "   [Skill System & Executables]\n"
             "   - 'skill': activate a domain skill into your persistent system instructions. Set 'text' to skill name (e.g. 'unity', 'windows-power').\n"
             "   - 'run_skill_script': execute a pre-tested helper script from a skill. Set 'target' to skill name and 'text' to script filename.\n\n"
@@ -1690,6 +1699,46 @@ class AgentLoop:
                         rolling_history.append(types.Content(
                             role="user",
                             parts=[types.Part(text=f"[LIST_CHECKPOINTS RESULT]\n{res_text}")],
+                        ))
+                        await asyncio.sleep(0.2)
+
+                    # ── generate_image_asset ─────────────────────────────────
+                    elif action_type == "generate_image_asset":
+                        f_path = action_param.path or action_param.target
+                        if not f_path:
+                            await self.send_status("⚠️ generate_image_asset requires a 'path'.")
+                            continue
+                        a_type = action_param.asset_type or "icon"
+                        w = action_param.width or 64
+                        h = action_param.height or 64
+                        lbl = action_param.label or action_param.text
+                        p_col = action_param.primary_color or "#4285F4"
+                        s_col = action_param.secondary_color or "#34A853"
+                        pres = action_param.preset
+                        if hitl_enabled:
+                            approved = await self.request_hitl_approval(f"GENERATE_IMAGE: {f_path} ({a_type}, {w}x{h})")
+                            if not approved:
+                                break
+                        await self.send_status(f"🎨 Generating {a_type} graphic: {f_path} ({w}x{h})...")
+                        ok, res_text = await asyncio.to_thread(
+                            dev_tools.generate_image_asset,
+                            f_path,
+                            a_type,
+                            w,
+                            h,
+                            lbl,
+                            p_col,
+                            s_col,
+                            pres,
+                            self.current_project_path,
+                        )
+                        if ok:
+                            await self.send_status(f"✅ {res_text}")
+                        else:
+                            await self.send_status(f"⚠️ Image generation error: {res_text}")
+                        rolling_history.append(types.Content(
+                            role="user",
+                            parts=[types.Part(text=f"[GENERATE_IMAGE_ASSET RESULT]\n{res_text}")],
                         ))
                         await asyncio.sleep(0.2)
 
