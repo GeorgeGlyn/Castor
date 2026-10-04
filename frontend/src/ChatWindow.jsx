@@ -2610,7 +2610,7 @@ function ChatWindow() {
         </main>
 
         {/* Elevated Bottom Input Dock */}
-        <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-[#09090b] via-[#09090b]/90 to-transparent pt-8 pb-5 px-4 pointer-events-none">
+        <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-[#09090b] via-[#09090b]/90 to-transparent pt-8 pb-5 px-4 pointer-events-none z-30">
           <div className="max-w-3xl mx-auto pointer-events-auto">
             {/* Slash Command Autocomplete Popover */}
             {showSlashMenu && (
@@ -2652,7 +2652,7 @@ function ChatWindow() {
               </div>
             )}
 
-            <div className="bg-[#18181b] border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden focus-within:border-zinc-700 focus-within:ring-1 focus-within:ring-zinc-700 transition-all">
+            <div className="relative bg-[#18181b] border border-zinc-800 rounded-2xl shadow-2xl focus-within:border-zinc-700 focus-within:ring-1 focus-within:ring-zinc-700 transition-all">
               <TextareaAutosize
                 minRows={1}
                 maxRows={8}
@@ -2695,13 +2695,17 @@ function ChatWindow() {
                       )}
                       {composerMode === 'plan' && (
                         <>
-                          <span>📋</span>
+                          <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                          </svg>
                           <span>Plan</span>
                         </>
                       )}
                       {composerMode === 'ask' && (
                         <>
-                          <span>💬</span>
+                          <svg className="w-3.5 h-3.5 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
                           <span>Ask</span>
                         </>
                       )}
@@ -2712,7 +2716,7 @@ function ChatWindow() {
 
                     {/* Mode Dropdown Menu matching user's screenshot exactly */}
                     {isModeMenuOpen && (
-                      <div className="absolute bottom-full left-0 mb-1.5 w-64 bg-[#1e1e24] border border-[#2e2e38] rounded-xl shadow-2xl py-1 z-50 animate-in fade-in zoom-in-95 duration-100 text-zinc-200">
+                      <div className="absolute bottom-full left-0 mb-2 w-64 bg-[#1e1e24] border border-[#2e2e38] rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-100 text-zinc-200 backdrop-blur-md">
                         {/* Agent Option */}
                         <button
                           type="button"
@@ -2745,7 +2749,9 @@ function ChatWindow() {
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
-                            <span className="text-xs text-purple-400 w-4 text-center">💬</span>
+                            <svg className="w-4 h-4 text-purple-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
                             <span>Ask</span>
                           </div>
                           <span className="text-[10px] font-mono text-zinc-500">Read-only</span>
@@ -2764,7 +2770,9 @@ function ChatWindow() {
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
-                            <span className="text-xs text-emerald-400 w-4 text-center">📋</span>
+                            <svg className="w-4 h-4 text-emerald-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                            </svg>
                             <span>Plan</span>
                           </div>
                           <span className="text-[10px] font-mono text-zinc-500">Interactive</span>
@@ -2781,7 +2789,10 @@ function ChatWindow() {
                           }}
                           className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs text-zinc-300 hover:text-white hover:bg-white/5 transition-colors"
                         >
-                          <span className="text-xs text-zinc-400 w-4 text-center">⚙️</span>
+                          <svg className="w-4 h-4 text-zinc-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          </svg>
                           <span>Configure Custom Agent...</span>
                         </button>
                       </div>
