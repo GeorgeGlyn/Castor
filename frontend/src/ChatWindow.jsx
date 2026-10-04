@@ -188,12 +188,14 @@ const DiffViewer = ({ diffData }) => {
   );
 };
 
-// ── Artifacts Sidecar Drawer (Antigravity Parity) ──────────────────────────
-const ArtifactsDrawer = ({ isOpen, onClose, artifacts, activeArtifact, onSelectArtifact }) => {
+// ── Artifacts & Action Replay Sidecar Drawer (Antigravity Parity) ──────────
+const SidecarDrawer = ({ isOpen, onClose, artifacts, activeArtifact, onSelectArtifact, scratchpad }) => {
+  const [activeTab, setActiveTab] = useState('artifacts');
   const [copied, setCopied] = useState(false);
   if (!isOpen) return null;
 
   const current = activeArtifact || artifacts[0] || null;
+  const completedSteps = scratchpad?.completed_steps || [];
 
   const handleCopy = () => {
     if (current?.content) {
@@ -205,15 +207,35 @@ const ArtifactsDrawer = ({ isOpen, onClose, artifacts, activeArtifact, onSelectA
 
   return (
     <div className="fixed inset-y-0 right-0 w-full sm:w-[480px] lg:w-[560px] bg-[#0d0d10] border-l border-zinc-800 shadow-2xl z-40 flex flex-col animate-in slide-in-from-right duration-200">
-      {/* Drawer Header */}
+      {/* Drawer Header with Dual Tabs */}
       <div className="h-12 px-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/80">
-        <div className="flex items-center gap-2">
-          <span className="text-sm">📄</span>
-          <h2 className="text-sm font-semibold text-zinc-100">Living Artifacts & Specs</h2>
-          <span className="text-[10px] font-mono bg-zinc-800 text-zinc-400 px-1.5 py-0.5 rounded-full">
-            {artifacts.length}
-          </span>
+        <div className="flex items-center gap-1.5 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
+          <button
+            onClick={() => setActiveTab('artifacts')}
+            className={`px-3 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all ${
+              activeTab === 'artifacts'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <span>📄</span>
+            <span>Artifacts</span>
+            <span className="text-[10px] font-mono opacity-80">({artifacts.length})</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('timeline')}
+            className={`px-3 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all ${
+              activeTab === 'timeline'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <span>⏪</span>
+            <span>Action Replay</span>
+            <span className="text-[10px] font-mono opacity-80">({completedSteps.length})</span>
+          </button>
         </div>
+
         <button
           onClick={onClose}
           className="text-zinc-400 hover:text-zinc-200 p-1.5 rounded-lg hover:bg-zinc-800 transition-colors"
@@ -222,63 +244,109 @@ const ArtifactsDrawer = ({ isOpen, onClose, artifacts, activeArtifact, onSelectA
         </button>
       </div>
 
-      {/* Artifacts Tabs */}
-      {artifacts.length > 0 && (
-        <div className="flex items-center gap-1.5 px-3 py-2 border-b border-zinc-800/80 overflow-x-auto bg-zinc-950/60 scrollbar-none">
-          {artifacts.map((art) => {
-            const isSel = current?.id === art.id;
-            return (
-              <button
-                key={art.id}
-                onClick={() => onSelectArtifact(art)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
-                  isSel
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
-                }`}
-              >
-                <span>{art.type === 'diagram' ? '📊' : art.type === 'code' ? '💻' : '📝'}</span>
-                <span className="truncate max-w-[140px]">{art.title}</span>
-              </button>
-            );
-          })}
+      {/* ── TAB 1: Artifacts View ── */}
+      {activeTab === 'artifacts' && (
+        <div className="flex-1 flex flex-col min-h-0">
+          {/* Artifacts Tabs */}
+          {artifacts.length > 0 && (
+            <div className="flex items-center gap-1.5 px-3 py-2 border-b border-zinc-800/80 overflow-x-auto bg-zinc-950/60 scrollbar-none">
+              {artifacts.map((art) => {
+                const isSel = current?.id === art.id;
+                return (
+                  <button
+                    key={art.id}
+                    onClick={() => onSelectArtifact(art)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+                      isSel
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
+                    }`}
+                  >
+                    <span>{art.type === 'diagram' ? '📊' : art.type === 'code' ? '💻' : '📝'}</span>
+                    <span className="truncate max-w-[140px]">{art.title}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Content Body */}
+          <div className="flex-1 overflow-y-auto p-4 select-text">
+            {current ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between pb-2 border-b border-zinc-800/80">
+                  <div>
+                    <h3 className="text-sm font-semibold text-zinc-100">{current.title}</h3>
+                    <p className="text-[10px] font-mono text-zinc-500 mt-0.5">{current.file_path || current.path}</p>
+                  </div>
+                  <button
+                    onClick={handleCopy}
+                    className="text-xs bg-zinc-800 hover:bg-zinc-750 text-zinc-300 hover:text-white px-2.5 py-1 rounded-md transition-colors border border-zinc-700/60"
+                  >
+                    {copied ? '✓ Copied' : 'Copy'}
+                  </button>
+                </div>
+
+                <div className="bg-[#09090b] border border-zinc-800/80 rounded-xl p-4 font-mono text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap">
+                  {current.content}
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-center text-zinc-500">
+                <div className="text-3xl mb-2">📑</div>
+                <p className="text-sm font-medium text-zinc-400">No artifacts generated yet</p>
+                <p className="text-xs text-zinc-600 max-w-xs mt-1">
+                  Ask Castor to plan an architecture with <code className="text-blue-400 font-mono">/plan</code> or create specs to see living documents here.
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      {/* Content Body */}
-      <div className="flex-1 overflow-y-auto p-4 select-text">
-        {current ? (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between pb-2 border-b border-zinc-800/80">
-              <div>
-                <h3 className="text-sm font-semibold text-zinc-100">{current.title}</h3>
-                <p className="text-[10px] font-mono text-zinc-500 mt-0.5">{current.file_path || current.path}</p>
+      {/* ── TAB 2: Action Replay Timeline View ── */}
+      {activeTab === 'timeline' && (
+        <div className="flex-1 overflow-y-auto p-4 select-text space-y-3">
+          {completedSteps.length > 0 ? (
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between pb-2 border-b border-zinc-800/60 text-xs text-zinc-400">
+                <span className="font-semibold text-zinc-300">Chronological Execution Log</span>
+                <span className="font-mono text-[10px] text-zinc-500">{completedSteps.length} Total Steps</span>
               </div>
-              <button
-                onClick={handleCopy}
-                className="text-xs bg-zinc-800 hover:bg-zinc-750 text-zinc-300 hover:text-white px-2.5 py-1 rounded-md transition-colors border border-zinc-700/60"
-              >
-                {copied ? '✓ Copied' : 'Copy'}
-              </button>
+              {completedSteps.map((step, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-start gap-3 p-3 bg-zinc-900/60 hover:bg-zinc-900 border border-zinc-800/80 rounded-xl text-xs transition-colors"
+                >
+                  <div className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40 flex items-center justify-center text-[10px] font-mono font-bold shrink-0 mt-0.5">
+                    {idx + 1}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-zinc-200 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
+                      {step}
+                    </p>
+                  </div>
+                  <span className="text-[9px] font-mono uppercase bg-zinc-800 text-zinc-400 px-1.5 py-0.5 rounded shrink-0">
+                    Done
+                  </span>
+                </div>
+              ))}
             </div>
-
-            <div className="bg-[#09090b] border border-zinc-800/80 rounded-xl p-4 font-mono text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap">
-              {current.content}
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full text-center text-zinc-500 py-16">
+              <div className="text-3xl mb-2">⏱️</div>
+              <p className="text-sm font-medium text-zinc-400">No actions executed yet</p>
+              <p className="text-xs text-zinc-600 max-w-xs mt-1">
+                When Castor clicks, edits files, generates assets, or runs terminal tests, every step will appear in this audit replay timeline.
+              </p>
             </div>
-          </div>
-        ) : (
-          <div className="flex flex-col items-center justify-center h-full text-center text-zinc-500">
-            <div className="text-3xl mb-2">📑</div>
-            <p className="text-sm font-medium text-zinc-400">No artifacts generated yet</p>
-            <p className="text-xs text-zinc-600 max-w-xs mt-1">
-              Ask Castor to plan an architecture with <code className="text-blue-400 font-mono">/plan</code> or create specs to see living documents here.
-            </p>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
+
 
 // Exponential backoff reconnect delay (capped at 30s)
 function getBackoffDelay(attempt) {
@@ -1840,15 +1908,17 @@ function ChatWindow() {
         </div>
       </div>
 
-      {/* Antigravity-Style Living Artifacts Sidecar Drawer */}
-      <ArtifactsDrawer
+      {/* Antigravity-Style Living Artifacts & Action Replay Sidecar Drawer */}
+      <SidecarDrawer
         isOpen={isArtifactsOpen}
         onClose={() => setIsArtifactsOpen(false)}
         artifacts={artifacts}
         activeArtifact={activeArtifact}
         onSelectArtifact={(art) => setActiveArtifact(art)}
+        scratchpad={scratchpad}
       />
     </div>
+
   );
 }
 
