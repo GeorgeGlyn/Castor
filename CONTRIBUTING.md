@@ -80,6 +80,36 @@ python -m unittest discover -s . -p "test_*.py"
 
 ---
 
+## 🌿 Branching Policy & Pull Request Workflow
+
+> [!IMPORTANT]
+> **Direct pushes to `main` (or `master`) are strictly prohibited.**
+> All changes must go through a dedicated feature/fix branch and a Pull Request with all automated CI checks passing.
+
+### Contribution Flow:
+1. **Fork or Create a Feature Branch**:
+   ```bash
+   git checkout -b feat/your-feature-name
+   # or
+   git checkout -b fix/issue-description
+   ```
+2. **Make your changes & commit locally** following our conventional commit standards.
+3. **Run local verification**:
+   ```bash
+   cd frontend && npm run build
+   cd ../backend && python -m unittest discover -s . -p "test_*.py"
+   ```
+4. **Push your branch & open a Pull Request** against `main`:
+   ```bash
+   git push origin feat/your-feature-name
+   ```
+5. **CI & Review**:
+   - The automated GitHub Actions CI pipeline will run on your PR.
+   - At least one maintainer review is required before merging.
+   - Merges are performed via Squash & Merge or Rebase to keep git history clean.
+
+---
+
 ## 🤝 Code Style & Commit Conventions
 
 - Use conventional commits:
@@ -89,3 +119,4 @@ python -m unittest discover -s . -p "test_*.py"
   - `refactor(...)`: Code refactoring without behavior change
   - `test(...)`: Adding or updating tests
 - Keep tools universal (avoid hardcoding application-specific logic unless creating a modular Domain Skill in `backend/skills/`).
+
