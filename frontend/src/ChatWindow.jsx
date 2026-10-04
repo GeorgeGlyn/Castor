@@ -409,6 +409,9 @@ function ChatWindow() {
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const exportMenuRef = useRef(null);
 
+  // ── Visual Action Replay Lightbox ──────────────────────────────────────────
+  const [selectedCropModal, setSelectedCropModal] = useState(null);
+
   // ── Chats State ───────────────────────────────────────────────────────────
   const [chats, setChats] = useState(() => {
     try {
@@ -922,6 +925,23 @@ function ChatWindow() {
       } else if (data.type === 'agent_response') {
         updateActiveChat((chat) => ({
           messages: [...(chat.messages || []), { role: 'assistant', text: data.text }],
+        }));
+      } else if (data.type === 'visual_action') {
+        updateActiveChat((chat) => ({
+          messages: [
+            ...(chat.messages || []),
+            {
+              role: 'visual_action',
+              action: data.action,
+              target: data.target,
+              destination: data.destination,
+              x: data.x,
+              y: data.y,
+              bbox: data.bbox,
+              crop: data.crop,
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            },
+          ],
         }));
       } else if (data.type === 'goal_complete') {
         setIsAgentRunning(false);
@@ -1864,6 +1884,59 @@ function ChatWindow() {
                 );
               }
 
+              if (msg.role === 'visual_action') {
+                return (
+                  <div key={i} className="flex justify-start max-w-3xl my-2 ml-11">
+                    <div className="bg-[#121216] border border-zinc-800 rounded-xl p-3 shadow-md flex items-start gap-3.5 max-w-full hover:border-zinc-700 transition-colors">
+                      {msg.crop && (
+                        <div
+                          className="relative group cursor-pointer shrink-0"
+                          onClick={() => setSelectedCropModal({ crop: msg.crop, target: msg.target, x: msg.x, y: msg.y, bbox: msg.bbox })}
+                          title="Click to view zoomed element crop"
+                        >
+                          <img
+                            src={msg.crop}
+                            alt={msg.target || 'Element Crop'}
+                            className="w-20 h-20 object-contain rounded-lg border border-zinc-700/80 bg-black shadow group-hover:border-blue-500 transition-colors"
+                          />
+                          <div className="absolute inset-0 bg-blue-600/0 group-hover:bg-blue-600/10 rounded-lg flex items-center justify-center transition-colors">
+                            <span className="opacity-0 group-hover:opacity-100 bg-black/80 text-white text-[9px] px-1.5 py-0.5 rounded font-mono transition-opacity shadow-sm">
+                              🔍 Zoom
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0 py-0.5">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                            {msg.action?.toUpperCase() || 'ACTION'}
+                          </span>
+                          <span className="text-xs font-semibold text-zinc-100 truncate">
+                            {msg.target}
+                          </span>
+                          {msg.time && (
+                            <span className="text-[10px] text-zinc-500 font-mono ml-auto">
+                              {msg.time}
+                            </span>
+                          )}
+                        </div>
+                        {msg.destination && (
+                          <div className="text-[11px] text-zinc-400 truncate mb-1">
+                            Destination: <span className="text-zinc-200 font-mono">{msg.destination}</span>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2 text-[10px] text-zinc-400 font-mono bg-zinc-900/80 px-2 py-0.5 rounded border border-zinc-800/80 w-fit">
+                          <span>Target: ({msg.x}, {msg.y})</span>
+                          {msg.bbox && msg.bbox[2] > 0 && (
+                            <span>• Size: {msg.bbox[2]}×{msg.bbox[3]}px</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
               if (msg.role === 'user_answer') {
                 return (
                   <div key={i} className="flex justify-end my-2">
@@ -1932,9 +2005,30 @@ function ChatWindow() {
                 </div>
                 <div className="flex-1 bg-[#18181b] border border-orange-900/50 rounded-xl p-4 shadow-xl">
                   <h3 className="text-sm font-medium text-orange-400 mb-1">Approval Required</h3>
-                  <p className="text-zinc-300 text-sm mb-4 bg-zinc-900 p-2 rounded border border-zinc-800 font-mono">
+                  <p className="text-zinc-300 text-sm mb-3 bg-zinc-900 p-2 rounded border border-zinc-800 font-mono">
                     {hitlRequest.action}
                   </p>
+                  {hitlRequest.crop && (
+                    <div className="mb-3.5 flex items-center gap-3 bg-zinc-950 p-2.5 rounded-lg border border-zinc-800">
+                      <img
+                        src={hitlRequest.crop}
+                        alt="Target crop"
+                        className="w-20 h-20 object-contain rounded border border-zinc-700 bg-black/60 shadow shrink-0 cursor-pointer hover:scale-105 transition-transform"
+                        onClick={() => setSelectedCropModal({ crop: hitlRequest.crop, target: hitlRequest.action, x: hitlRequest.x, y: hitlRequest.y, bbox: hitlRequest.bbox })}
+                        title="Click to zoom element preview"
+                      />
+                      <div className="text-xs text-zinc-400">
+                        <div className="font-semibold text-zinc-200">Target Visual Inspection</div>
+                        <div className="text-[11px] text-zinc-500 font-mono mt-0.5">
+                          Screen Pos: ({hitlRequest.x}, {hitlRequest.y})
+                          {hitlRequest.bbox && hitlRequest.bbox[2] > 0 && ` • Size: ${hitlRequest.bbox[2]}×${hitlRequest.bbox[3]}px`}
+                        </div>
+                        <span className="text-[10px] text-blue-400 cursor-pointer hover:underline mt-1 inline-block" onClick={() => setSelectedCropModal({ crop: hitlRequest.crop, target: hitlRequest.action, x: hitlRequest.x, y: hitlRequest.y, bbox: hitlRequest.bbox })}>
+                          🔍 Click image to enlarge
+                        </span>
+                      </div>
+                    </div>
+                  )}
                   <div className="flex gap-3">
                     <button
                       onClick={approveAction}
@@ -2232,6 +2326,49 @@ function ChatWindow() {
           </div>
         </div>
       </div>
+
+      {/* Visual Crop Lightbox Modal */}
+      {selectedCropModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setSelectedCropModal(null)}
+        >
+          <div
+            className="bg-[#121216] border border-zinc-700 rounded-2xl max-w-lg w-full p-5 shadow-2xl space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-base shrink-0">🎯</span>
+                <span className="text-sm font-semibold text-zinc-100 truncate">
+                  Visual Target: {selectedCropModal.target || 'Element'}
+                </span>
+              </div>
+              <button
+                onClick={() => setSelectedCropModal(null)}
+                className="text-zinc-400 hover:text-zinc-200 text-sm font-mono w-6 h-6 flex items-center justify-center rounded hover:bg-zinc-800"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex items-center justify-center bg-black rounded-xl p-4 border border-zinc-800 overflow-hidden">
+              <img
+                src={selectedCropModal.crop}
+                alt="Element crop zoomed"
+                className="max-h-80 w-auto object-contain rounded shadow"
+              />
+            </div>
+
+            <div className="flex items-center justify-between text-xs text-zinc-400 font-mono bg-zinc-950 p-2.5 rounded-lg border border-zinc-800/80">
+              <span>Target Point: ({selectedCropModal.x}, {selectedCropModal.y})</span>
+              {selectedCropModal.bbox && selectedCropModal.bbox[2] > 0 && (
+                <span>BBox: {selectedCropModal.bbox[2]}×{selectedCropModal.bbox[3]}px</span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Antigravity-Style Living Artifacts & Action Replay Sidecar Drawer */}
       <SidecarDrawer
