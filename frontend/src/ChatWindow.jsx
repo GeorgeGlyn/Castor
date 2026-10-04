@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
 import Sidebar from './Sidebar';
+import { generateHtmlReport, generateMarkdownReport, downloadFile } from './exportReport';
 
 // ── Audio Cues (Zero External Dependencies, Pure Web Audio API) ─────────────
 const playSoundCue = (type = 'success') => {
@@ -403,6 +404,10 @@ function ChatWindow() {
   const [activeMonitorIndex, setActiveMonitorIndex] = useState(1);
   const [isMonitorMenuOpen, setIsMonitorMenuOpen] = useState(false);
   const monitorMenuRef = useRef(null);
+
+  // ── Session Export State ───────────────────────────────────────────────────
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+  const exportMenuRef = useRef(null);
 
   // ── Chats State ───────────────────────────────────────────────────────────
   const [chats, setChats] = useState(() => {
@@ -991,6 +996,9 @@ function ChatWindow() {
       if (monitorMenuRef.current && !monitorMenuRef.current.contains(e.target)) {
         setIsMonitorMenuOpen(false);
       }
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target)) {
+        setIsExportMenuOpen(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -1011,6 +1019,97 @@ function ChatWindow() {
     const targetMon = monitors.find((m) => m.index === monIndex);
     const label = targetMon ? `${targetMon.name} (${targetMon.width}×${targetMon.height})` : `Display ${monIndex}`;
     setAgentStatus(`🖥️ Switched screen focus to ${label}`);
+  };
+
+  // ── Session & Run Report Exports ───────────────────────────────────────────
+  const handleExportHtml = async () => {
+    setIsExportMenuOpen(false);
+    const htmlContent = generateHtmlReport({
+      chat: activeChat,
+      project: activeProject,
+      artifacts,
+    });
+    const safeTitle = (activeChat?.title || 'Castor_Session').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filename = `${safeTitle}_Report.html`;
+    await downloadFile({
+      filename,
+      content: htmlContent,
+      mimeType: 'text/html',
+      filters: [{ name: 'HTML Document', extensions: ['html'] }],
+    });
+    playSoundCue('success');
+    setAgentStatus(`📥 Exported interactive report as ${filename}`);
+  };
+
+  const handleExportMarkdown = async () => {
+    setIsExportMenuOpen(false);
+    const mdContent = generateMarkdownReport({
+      chat: activeChat,
+      project: activeProject,
+      artifacts,
+    });
+    const safeTitle = (activeChat?.title || 'Castor_Session').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filename = `${safeTitle}_Summary.md`;
+    await downloadFile({
+      filename,
+      content: mdContent,
+      mimeType: 'text/markdown',
+      filters: [{ name: 'Markdown File', extensions: ['md'] }],
+    });
+    playSoundCue('success');
+    setAgentStatus(`📥 Exported markdown summary as ${filename}`);
+  };
+
+  const handleExportPdf = async () => {
+    setIsExportMenuOpen(false);
+    const htmlContent = generateHtmlReport({
+      chat: activeChat,
+      project: activeProject,
+      artifacts,
+    });
+    const safeTitle = (activeChat?.title || 'Castor_Session').replace(/[^a-zA-Z0-9_-]/g, '_');
+    if (window.electronAPI?.exportPDF) {
+      setAgentStatus('Generating print-ready PDF document...');
+      const res = await window.electronAPI.exportPDF({
+        defaultPath: `${safeTitle}_Report.pdf`,
+        htmlContent,
+      });
+      if (res?.success) {
+        playSoundCue('success');
+        setAgentStatus(`✅ Successfully saved PDF report`);
+      } else if (!res?.canceled) {
+        setAgentStatus(`⚠️ PDF Export failed: ${res?.error || 'Unknown error'}`);
+      }
+    } else {
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(htmlContent);
+        printWindow.document.close();
+        printWindow.focus();
+        setTimeout(() => printWindow.print(), 250);
+      }
+    }
+  };
+
+  const handleExportJson = async () => {
+    setIsExportMenuOpen(false);
+    const sessionData = {
+      version: '1.0',
+      chat: activeChat,
+      project: activeProject,
+      artifacts,
+      exportedAt: new Date().toISOString(),
+    };
+    const safeTitle = (activeChat?.title || 'Castor_Session').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filename = `${safeTitle}_Archive.json`;
+    await downloadFile({
+      filename,
+      content: JSON.stringify(sessionData, null, 2),
+      mimeType: 'application/json',
+      filters: [{ name: 'JSON Archive', extensions: ['json'] }],
+    });
+    playSoundCue('success');
+    setAgentStatus(`📥 Exported session JSON archive as ${filename}`);
   };
 
   // ── Kill-switch IPC from Electron ──────────────────────────────────────────
@@ -1390,6 +1489,81 @@ function ChatWindow() {
               )}
             </button>
 
+            {/* Session Export & Run Report Dropdown */}
+            <div className="relative" ref={exportMenuRef}>
+              <button
+                onClick={() => setIsExportMenuOpen((prev) => !prev)}
+                className={`text-xs px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm border ${
+                  isExportMenuOpen
+                    ? 'bg-zinc-800 text-zinc-100 border-zinc-600'
+                    : 'text-zinc-400 hover:text-zinc-200 bg-zinc-850 hover:bg-zinc-800 border-zinc-750'
+                }`}
+                title="Export session run report, executive summary, or raw archive"
+              >
+                <span>📥</span>
+                <span>Export</span>
+                <svg className={`w-3 h-3 text-zinc-400 transition-transform ${isExportMenuOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {isExportMenuOpen && (
+                <div className="absolute right-0 mt-1.5 w-64 bg-zinc-900 border border-zinc-750 rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
+                  <div className="px-3 py-1.5 border-b border-zinc-800 text-[10px] font-semibold text-zinc-400 uppercase tracking-wider flex items-center justify-between">
+                    <span>Export Session Report</span>
+                    <span className="text-zinc-500 font-mono font-normal">Castor AI</span>
+                  </div>
+                  <div className="py-1">
+                    <button
+                      onClick={handleExportHtml}
+                      className="w-full text-left px-3 py-2 text-xs flex items-center gap-2.5 hover:bg-zinc-800 transition-colors text-zinc-200"
+                    >
+                      <span className="text-base">🌐</span>
+                      <div>
+                        <div className="font-medium text-zinc-200">Interactive HTML Report</div>
+                        <div className="text-[10px] text-zinc-400">Self-contained, dark-mode, timeline &amp; diffs</div>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={handleExportMarkdown}
+                      className="w-full text-left px-3 py-2 text-xs flex items-center gap-2.5 hover:bg-zinc-800 transition-colors text-zinc-200"
+                    >
+                      <span className="text-base">📝</span>
+                      <div>
+                        <div className="font-medium text-zinc-200">GitHub Markdown (.md)</div>
+                        <div className="text-[10px] text-zinc-400">Checklists &amp; diffs for PRs and issues</div>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={handleExportPdf}
+                      className="w-full text-left px-3 py-2 text-xs flex items-center gap-2.5 hover:bg-zinc-800 transition-colors text-zinc-200"
+                    >
+                      <span className="text-base">🖨️</span>
+                      <div>
+                        <div className="font-medium text-zinc-200">Print / Save as PDF</div>
+                        <div className="text-[10px] text-zinc-400">Formatted executive summary document</div>
+                      </div>
+                    </button>
+
+                    <div className="my-1 border-t border-zinc-800" />
+
+                    <button
+                      onClick={handleExportJson}
+                      className="w-full text-left px-3 py-2 text-xs flex items-center gap-2.5 hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-zinc-200"
+                    >
+                      <span className="text-base">📦</span>
+                      <div>
+                        <div className="font-medium">Raw JSON Archive</div>
+                        <div className="text-[10px] text-zinc-500">Complete telemetry and messages data</div>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <button
               onClick={handleBrowseProject}
               className="text-xs text-zinc-400 hover:text-zinc-200 bg-zinc-850 hover:bg-zinc-800 border border-zinc-750 px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm"
@@ -1420,7 +1594,15 @@ function ChatWindow() {
                   )}
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2.5">
+                  <button
+                    onClick={handleExportHtml}
+                    className="text-xs text-blue-300 hover:text-blue-200 bg-blue-950/40 hover:bg-blue-900/50 px-2 py-0.5 rounded border border-blue-800/50 flex items-center gap-1 transition-colors shadow-sm"
+                    title="Export standalone HTML run report"
+                  >
+                    <span>📥</span>
+                    <span>Report</span>
+                  </button>
                   <span className="text-[11px] text-zinc-500 font-mono hidden sm:inline">
                     {scratchpad.completed_steps?.length || 0} actions taken
                   </span>
