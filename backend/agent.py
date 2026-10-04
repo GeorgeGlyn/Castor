@@ -157,7 +157,9 @@ class ActionParams(BaseModel):
     query: Optional[str] = None        # Search pattern/regex for grep_search or search_web
     duration_seconds: Optional[int] = None # For schedule (seconds to wait for builds / domain reloads)
     test_command: Optional[str] = None    # For run_tests (e.g. "npm test", "pytest", "cargo test")
+    auto_fix: Optional[bool] = None        # For run_tests: enable autonomous self-healing checkpoint-and-repair loop on failure
     # Universal Workspace Safety Checkpoints:
+
     checkpoint_id: Optional[str] = None   # For restore_checkpoint (e.g. "cp_123" or "latest")
     checkpoint_desc: Optional[str] = None # For create_checkpoint (e.g. "Before database migration")
     # Antigravity Developer Tool Extensions:
@@ -694,7 +696,7 @@ class AgentLoop:
             "   - 'restore_checkpoint': cleanly roll back workspace to a previous checkpoint if code generation fails or tests break. Set 'checkpoint_id' (or 'latest').\n"
             "   - 'list_checkpoints': view all available safety checkpoints in this workspace.\n"
             "   - 'generate_image_asset': create clean visual assets for any project (PNG or SVG). Supports dual-mode generation: 'image_mode' ('ai' for Google Nano Banana / Gemini image generation with prompt, 'python' for zero-quota local Pillow/SVG generation, or 'ask' to display an interactive modal asking the user's preference). Set 'path', 'prompt' (for AI), 'asset_type' ('icon' | 'pixel_sprite' | 'texture' | 'badge' | 'gradient' | 'svg'), 'width', 'height', and optional 'preset'/'label'. If AI quota is exhausted, it automatically falls back to local Python generation!\n"
-            "   - 'run_tests': execute automated tests or build verification for ANY project type (Python, JavaScript/TypeScript, Go, Rust, C#/.NET) with automatic framework detection or custom 'test_command'. Use to verify that code changes work with zero regressions!\n\n"
+            "   - 'run_tests': execute automated tests or build verification for ANY project type (Python, JavaScript/TypeScript, Go, Rust, C#/.NET) with automatic framework detection or custom 'test_command'. When tests fail, you can inspect tracebacks, surgical-edit files with 'replace_file_content', or set 'auto_fix'=True for automated checkpoint-and-repair iterations!\n\n"
             "   [Skill System & Executables]\n"
             "   - 'skill': activate a domain skill into your persistent system instructions. Set 'text' to skill name (e.g. 'unity', 'windows-power').\n"
             "   - 'run_skill_script': execute a pre-tested helper script from a skill. Set 'target' to skill name and 'text' to script filename.\n\n"
@@ -1796,24 +1798,62 @@ class AgentLoop:
                         await asyncio.sleep(0.2)
 
 
-                    # ── run_tests ────────────────────────────────────────────
+                    # ── run_tests (Self-Healing Autonomous Verification Loop) ─
                     elif action_type == "run_tests":
                         t_cmd = action_param.test_command or action_param.text
+                        auto_fix = bool(action_param.auto_fix)
                         await self.send_status(f"🧪 Running tests ({t_cmd or 'auto-detected runner'})...")
                         ok, res_text = await asyncio.to_thread(
                             dev_tools.run_tests,
                             t_cmd,
                             self.current_project_path,
                         )
+
                         if ok:
                             await self.send_status("✅ All tests passed!")
                         else:
                             await self.send_status("❌ Test failures detected.")
+                            # Autonomous Self-Healing: Snapshot checkpoint and trigger repair
+                            if auto_fix:
+                                await self.send_status("🛡️ Creating auto-safety checkpoint before repair...")
+                                cp_ok, cp_msg = checkpoint_manager.create_checkpoint(
+                                    f"Pre-repair: {t_cmd or 'auto tests'}",
+                                    self.current_project_path,
+                                )
+                                await self.send_status(f"🧠 Launching self-healing repair subagent on test failure...")
+                                repair_prompt = (
+                                    f"Fix the failing test errors in the project.\n\n"
+                                    f"TEST OUTPUT:\n{res_text[:3500]}\n\n"
+                                    f"1. Read the error tracebacks and locate the failing files.\n"
+                                    f"2. Inspect the code with 'view_file'.\n"
+                                    f"3. Make minimal, surgical fixes with 'replace_file_content'.\n"
+                                    f"4. Re-run tests with 'run_tests' until all tests pass."
+                                )
+                                sub_ok, sub_report = await asyncio.to_thread(
+                                    run_subagent,
+                                    prompt=repair_prompt,
+                                    current_project_path=self.current_project_path,
+                                    max_steps=8,
+                                )
+                                # Re-verify after repair attempt
+                                ok, res_text = await asyncio.to_thread(
+                                    dev_tools.run_tests,
+                                    t_cmd,
+                                    self.current_project_path,
+                                )
+                                if ok:
+                                    await self.send_status("🎉 Self-healing successful! All tests now pass.")
+                                    res_text = f"✅ Self-Healing Loop Fixed All Errors:\n{res_text}\n\nRepair Report:\n{sub_report}"
+                                else:
+                                    await self.send_status("⚠️ Auto-fix attempted but some test errors remain. Reviewing tracebacks...")
+                                    res_text = f"❌ Tests still failing after self-healing attempt:\n{res_text}\n\nRepair Log:\n{sub_report}"
+
                         rolling_history.append(types.Content(
                             role="user",
                             parts=[types.Part(text=f"[RUN_TESTS RESULT]\n{res_text}")],
                         ))
                         await asyncio.sleep(0.3)
+
 
                     # ── type ─────────────────────────────────────────────────
                     elif action_type == "type":
