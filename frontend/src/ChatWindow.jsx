@@ -398,6 +398,12 @@ function ChatWindow() {
     }
   });
 
+  // ── Multi-Monitor Display State ───────────────────────────────────────────
+  const [monitors, setMonitors] = useState([]);
+  const [activeMonitorIndex, setActiveMonitorIndex] = useState(1);
+  const [isMonitorMenuOpen, setIsMonitorMenuOpen] = useState(false);
+  const monitorMenuRef = useRef(null);
+
   // ── Chats State ───────────────────────────────────────────────────────────
   const [chats, setChats] = useState(() => {
     try {
@@ -773,6 +779,27 @@ function ChatWindow() {
       if (data.type === 'init_state') {
         setAvailableSkills(data.available_skills || []);
         setActiveSkills(data.active_skills || []);
+        if (data.monitors && data.monitors.length > 0) {
+          setMonitors(data.monitors);
+        }
+        if (data.active_monitor) {
+          setActiveMonitorIndex(data.active_monitor);
+        }
+      } else if (data.type === 'monitor_changed') {
+        if (data.monitor_index) {
+          setActiveMonitorIndex(data.monitor_index);
+          window.electronAPI?.setActiveDisplay?.(data.monitor_index);
+        }
+        if (data.monitors) {
+          setMonitors(data.monitors);
+        }
+      } else if (data.type === 'monitors_list') {
+        if (data.monitors) {
+          setMonitors(data.monitors);
+        }
+        if (data.active_monitor) {
+          setActiveMonitorIndex(data.active_monitor);
+        }
       } else if (data.type === 'status') {
         setAgentStatus(data.message);
         const msgText = data.message || '';
@@ -946,6 +973,45 @@ function ChatWindow() {
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
     };
   }, [connectWebSocket]);
+
+  // ── Multi-Monitor Setup & Outside Click Handler ─────────────────────────────
+  useEffect(() => {
+    fetch('http://localhost:8000/api/monitors')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.monitors && data.monitors.length > 0) {
+          setMonitors(data.monitors);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (monitorMenuRef.current && !monitorMenuRef.current.contains(e.target)) {
+        setIsMonitorMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleSelectMonitor = (monIndex) => {
+    setActiveMonitorIndex(monIndex);
+    setIsMonitorMenuOpen(false);
+    if (window.electronAPI?.setActiveDisplay) {
+      window.electronAPI.setActiveDisplay(monIndex);
+    }
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        action: 'select_monitor',
+        monitor_index: monIndex,
+      }));
+    }
+    const targetMon = monitors.find((m) => m.index === monIndex);
+    const label = targetMon ? `${targetMon.name} (${targetMon.width}×${targetMon.height})` : `Display ${monIndex}`;
+    setAgentStatus(`🖥️ Switched screen focus to ${label}`);
+  };
 
   // ── Kill-switch IPC from Electron ──────────────────────────────────────────
   useEffect(() => {
@@ -1216,6 +1282,83 @@ function ChatWindow() {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Multi-Monitor Display Selector */}
+            <div className="relative" ref={monitorMenuRef}>
+              <button
+                onClick={() => {
+                  if (monitors.length > 1) {
+                    setIsMonitorMenuOpen((prev) => !prev);
+                  }
+                }}
+                className={`text-xs px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm border ${
+                  monitors.length > 1
+                    ? 'bg-zinc-850 hover:bg-zinc-800 text-zinc-200 border-zinc-750 hover:border-blue-500/50 cursor-pointer'
+                    : 'bg-zinc-850/80 text-zinc-300 border-zinc-750 cursor-default'
+                }`}
+                title={monitors.length > 1 ? 'Click to select screen for AI visual automation' : 'Active screen for AI visual automation'}
+              >
+                <span className="text-xs">🖥️</span>
+                <span className="font-medium">
+                  {monitors.find((m) => m.index === activeMonitorIndex)?.name || `Display ${activeMonitorIndex}`}
+                </span>
+                {monitors.find((m) => m.index === activeMonitorIndex) && (
+                  <span className="text-[10px] text-zinc-400 font-mono hidden sm:inline">
+                    ({monitors.find((m) => m.index === activeMonitorIndex)?.width}×{monitors.find((m) => m.index === activeMonitorIndex)?.height})
+                  </span>
+                )}
+                {monitors.length > 1 && (
+                  <svg className={`w-3 h-3 text-zinc-400 transition-transform ${isMonitorMenuOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                )}
+              </button>
+
+              {isMonitorMenuOpen && monitors.length > 1 && (
+                <div className="absolute right-0 mt-1.5 w-64 bg-zinc-900 border border-zinc-700/80 rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
+                  <div className="px-3 py-1.5 border-b border-zinc-800 text-[10px] font-semibold text-zinc-400 uppercase tracking-wider flex items-center justify-between">
+                    <span>Target Display</span>
+                    <span className="text-zinc-500 font-mono font-normal">{monitors.length} connected</span>
+                  </div>
+                  <div className="py-1">
+                    {monitors.map((mon) => {
+                      const isSelected = mon.index === activeMonitorIndex;
+                      return (
+                        <button
+                          key={mon.index}
+                          onClick={() => handleSelectMonitor(mon.index)}
+                          className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-zinc-800/80 transition-colors ${
+                            isSelected ? 'bg-blue-600/15 text-blue-300 font-medium' : 'text-zinc-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm">🖥️</span>
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-medium text-zinc-200">{mon.name}</span>
+                                {mon.is_primary && (
+                                  <span className="text-[9px] px-1 py-0.2 bg-blue-500/20 text-blue-400 rounded border border-blue-500/30">
+                                    Primary
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-zinc-400 font-mono">
+                                {mon.width}×{mon.height} @ ({mon.left}, {mon.top})
+                              </div>
+                            </div>
+                          </div>
+                          {isSelected && (
+                            <svg className="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
             <button
               onClick={toggleAlwaysOnTop}
               className={`text-xs px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm border ${

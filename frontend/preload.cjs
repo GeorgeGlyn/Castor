@@ -21,5 +21,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Overlay UI events
   onDrawHud: (callback) => ipcRenderer.on('draw-hud', (event, data) => callback(data)),
   removeAllDrawHudListeners: () => ipcRenderer.removeAllListeners('draw-hud'),
+
+  // Multi-Monitor Display Management
+  setActiveDisplay: (displayIndex) => ipcRenderer.send('set-active-display', { displayIndex }),
+  getDisplays: () => ipcRenderer.invoke('get-displays'),
 });
 
