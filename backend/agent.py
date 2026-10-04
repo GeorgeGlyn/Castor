@@ -64,6 +64,24 @@ if os.name == "nt":
             except Exception:
                 pass
 
+def ensure_input_desktop():
+    """
+    On Windows, worker threads spawned by asyncio.to_thread do not automatically
+    have access to the interactive user input desktop (winsta0\\default).
+    Without attaching, GDI screen capture (mss / BitBlt) yields pitch-black images,
+    and cursor positioning (SetCursorPos / PyAutoGUI) fails silently.
+    """
+    if os.name == "nt":
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            desk = user32.OpenInputDesktop(0, False, 0x01FF)
+            if desk:
+                user32.SetThreadDesktop(desk)
+        except Exception:
+            pass
+
+
 # ── Config ───────────────────────────────────────────────────────────────────
 MAX_STEPS: int = int(os.getenv("MAX_STEPS", "30"))
 HISTORY_WINDOW: int = int(os.getenv("HISTORY_WINDOW", "10"))  # Keep last N turns in history
@@ -233,7 +251,7 @@ class AgentLoop:
         self.api_key = os.getenv("GEMINI_API_KEY")
         # Model names are read fresh inside run() so .env changes take effect after reload
         self.planner_model = os.getenv("PLANNER_MODEL", "gemini-3.7-flash")
-        self.grounder_model = os.getenv("GROUNDER_MODEL", "gemini-flash-lite-latest")
+        self.grounder_model = os.getenv("GROUNDER_MODEL", "gemini-3.5-flash-lite")
         self.diff_threshold = float(os.getenv("SCREEN_DIFF_THRESHOLD", "1.0"))
         self.question_event = asyncio.Event()
         self.user_answers: list = []
@@ -255,11 +273,21 @@ class AgentLoop:
     # ── Screen capture ────────────────────────────────────────────────────────
 
     def capture_screen_sync(self):
+        ensure_input_desktop()
         with mss.mss() as sct:
             monitor = sct.monitors[1]  # Primary monitor
             sct_img = sct.grab(monitor)
             img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
+            # If screen capture returned pitch-black (due to thread desktop detachment or display state), re-attach and retry
+            extrema = img.getextrema()
+            if extrema == ((0, 0), (0, 0), (0, 0)):
+                ensure_input_desktop()
+                sct_img2 = sct.grab(monitor)
+                img2 = Image.frombytes("RGB", sct_img2.size, sct_img2.bgra, "raw", "BGRX")
+                if img2.getextrema() != ((0, 0), (0, 0), (0, 0)):
+                    img = img2
             return img, monitor
+
 
     async def capture_screen(self):
         return await asyncio.to_thread(self.capture_screen_sync)
@@ -394,21 +422,32 @@ class AgentLoop:
             "Return 'box_2d' as [ymin, xmin, ymax, xmax] normalized to [0, 1000] integer scale.\n"
             "- ymin, ymax: vertical boundaries (0 = top, 1000 = bottom)\n"
             "- xmin, xmax: horizontal boundaries (0 = leftmost, 1000 = rightmost)\n\n"
-            "SPECIAL RULES FOR DROPDOWNS, MENUS & POPUPS:\n"
-            "1. When locating an item in an open dropdown menu, combo box, context menu, or menu bar "
-            "(e.g. 'Build Super Mario Level 1' under 'Tools', 'Save As', 'Projects'):\n"
-            "   Locate the specific ROW/OPTION inside the opened popup list, NOT the parent menu header.\n"
-            "2. Center your bounding box horizontally and vertically on the clickable row text.\n"
-            "3. If the element is visible, return its tight bounding box and set target_found=true. "
-            "If not found or not visible, return box_2d=[-1, -1, -1, -1] and target_found=false."
+            "CRITICAL RULES FOR ACCURATE GROUNDING:\n"
+            "1. MENUS & DROPDOWNS: When locating an item in an open dropdown menu, combo box, context menu, or menu bar:\n"
+            "   Locate the specific clickable text row/option inside the opened popup list, NOT the parent menu header.\n"
+            "   If the target description specifies a hierarchy like 'Menu > Item' (e.g. 'File > Save As'), locate ONLY the final leaf item ('Save As') in the active menu.\n"
+            "2. BUTTONS & CONTROLS: Center your bounding box on the clickable button or icon label, not the outer container or panel.\n"
+            "3. TABS & HEADERS: Locate the specific tab button (e.g. 'README.md', 'Scene', 'Game', 'Console').\n"
+            "4. Return tight bounding box around the exact clickable element. If not found or not visible on screen, return box_2d=[-1, -1, -1, -1] and target_found=false."
         )
 
         try:
+            # Hierarchy / breadcrumb handling: if target is "Tools > Build Mario", extract leaf target
+            clean_target = target_desc.strip()
+            if " > " in clean_target:
+                clean_target = clean_target.split(" > ")[-1].strip()
+            elif " -> " in clean_target:
+                clean_target = clean_target.split(" -> ")[-1].strip()
+
+            prompt_text = f"Locate the exact clickable bounding box for: \"{clean_target}\""
+            if clean_target != target_desc.strip():
+                prompt_text += f" (within menu path: \"{target_desc.strip()}\")"
+
             # We pass full_img directly for maximum resolution and sharpness
             res = self.generate_content_with_fallback(
                 primary_model=self.grounder_model,
                 contents=[
-                    types.Part(text=f"Locate the exact clickable bounding box for: \"{target_desc}\""),
+                    types.Part(text=prompt_text),
                     pil_to_part(full_img),
                 ],
                 config=types.GenerateContentConfig(
@@ -420,9 +459,9 @@ class AgentLoop:
                 fallback_models=[
                     "gemini-3.5-flash-lite",
                     "gemini-3.1-flash-lite",
-                    "gemini-flash-lite-latest",
+                    "gemini-3.7-flash",
                     "gemini-3-flash-preview",
-                    "gemini-3.1-flash-lite-preview",
+                    "gemini-flash-lite-latest",
                 ]
             )
             data = json.loads(res.text)
@@ -459,7 +498,7 @@ class AgentLoop:
                     c_y2 = c_y1 + crop_h
                     patch = full_img.crop((c_x1, c_y1, c_x2, c_y2))
 
-                    patch_prompt = f"In this zoomed-in patch, detect the precise clickable bounding box for: \"{target_desc}\""
+                    patch_prompt = f"In this zoomed-in patch, detect the precise clickable bounding box for: \"{clean_target}\""
                     patch_res = self.generate_content_with_fallback(
                         primary_model=self.grounder_model,
                         contents=[
@@ -475,6 +514,7 @@ class AgentLoop:
                         fallback_models=[
                             "gemini-3.5-flash-lite",
                             "gemini-3.1-flash-lite",
+                            "gemini-3.7-flash",
                             "gemini-3-flash-preview",
                             "gemini-flash-lite-latest",
                         ]
@@ -485,12 +525,22 @@ class AgentLoop:
                         p_ymin, p_xmin, p_ymax, p_xmax = p_box
                         refined_local_x = ((p_xmin + p_xmax) / 2000.0) * crop_w
                         refined_local_y = ((p_ymin + p_ymax) / 2000.0) * crop_h
-                        px = int(c_x1 + refined_local_x) + monitor["left"]
-                        py = int(c_y1 + refined_local_y) + monitor["top"]
-                        w = int(((p_xmax - p_xmin) / 1000.0) * crop_w)
-                        h = int(((p_ymax - p_ymin) / 1000.0) * crop_h)
+
+                        # Sanity check: Ensure refined point is reasonably close to expected local position in crop
+                        exp_local_x = px_local - c_x1
+                        exp_local_y = py_local - c_y1
+                        drift = ((refined_local_x - exp_local_x) ** 2 + (refined_local_y - exp_local_y) ** 2) ** 0.5
+
+                        if drift < 80:
+                            px = int(c_x1 + refined_local_x) + monitor["left"]
+                            py = int(c_y1 + refined_local_y) + monitor["top"]
+                            w = int(((p_xmax - p_xmin) / 1000.0) * crop_w)
+                            h = int(((p_ymax - p_ymin) / 1000.0) * crop_h)
+                        else:
+                            print(f"[Castor] Zoom refinement rejected (drift {drift:.1f}px > 80px)")
                 except Exception as e:
                     print(f"[Castor] Zoom refinement bypass: {e}")
+
 
             left = px - w // 2
             top = py - h // 2
@@ -550,7 +600,7 @@ class AgentLoop:
         load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"), override=True)
         self.api_key = os.getenv("GEMINI_API_KEY")
         self.planner_model = os.getenv("PLANNER_MODEL", "gemini-flash-lite-latest")
-        self.grounder_model = os.getenv("GROUNDER_MODEL", "gemini-flash-lite-latest")
+        self.grounder_model = os.getenv("GROUNDER_MODEL", "gemini-3.5-flash-lite")
 
         # ── Validate API key ─────────────────────────────────────────────────
         if not self.api_key:
@@ -1916,6 +1966,7 @@ class AgentLoop:
                                 break
 
                         def do_type():
+                            ensure_input_desktop()
                             # Use clipboard paste for full Unicode support if pyperclip is installed
                             if pyperclip:
                                 try:
@@ -1941,7 +1992,12 @@ class AgentLoop:
                                 break
 
                         keys = action_param.keys
-                        await asyncio.to_thread(lambda: pyautogui.hotkey(*keys))
+
+                        def do_hotkey():
+                            ensure_input_desktop()
+                            pyautogui.hotkey(*keys)
+
+                        await asyncio.to_thread(do_hotkey)
                         await self.send_status(f"⚡ Pressed hotkey: {'+'.join(keys)}")
                         await asyncio.sleep(0.3)
 
@@ -1968,8 +2024,18 @@ class AgentLoop:
                         sx, sy = scroll_x, scroll_y  # Closure capture
 
                         def do_scroll():
+                            ensure_input_desktop()
                             if sx and sy:
-                                pyautogui.moveTo(sx, sy, duration=0.15)
+                                if os.name == "nt":
+                                    try:
+                                        import ctypes
+                                        ctypes.windll.user32.SetCursorPos(int(sx), int(sy))
+                                    except Exception:
+                                        pass
+                                try:
+                                    pyautogui.moveTo(sx, sy, duration=0.15)
+                                except Exception:
+                                    pass
                             pyautogui.scroll(clicks)
 
                         await asyncio.to_thread(do_scroll)
@@ -2035,9 +2101,21 @@ class AgentLoop:
                         _action_type = action_type
 
                         def execute_mouse():
-                            # Instant teleport directly to coordinates.
+                            ensure_input_desktop()
+                            # Hardware cursor teleport directly to coordinates.
                             # Eliminates mouse-sweep hover events that dismiss popup/dropdown menus in Unity and Windows!
-                            pyautogui.moveTo(_px, _py)
+                            if os.name == "nt":
+                                try:
+                                    import ctypes
+                                    clamped_x = max(monitor["left"] + 2, min(monitor["left"] + monitor["width"] - 2, int(_px)))
+                                    clamped_y = max(monitor["top"] + 2, min(monitor["top"] + monitor["height"] - 2, int(_py)))
+                                    ctypes.windll.user32.SetCursorPos(clamped_x, clamped_y)
+                                except Exception:
+                                    pass
+                            try:
+                                pyautogui.moveTo(_px, _py)
+                            except Exception:
+                                pass
                             time.sleep(0.04)  # Hover settling time for reactive UI states
                             if _action_type == "click":
                                 pyautogui.mouseDown(_px, _py)
@@ -2047,7 +2125,18 @@ class AgentLoop:
                                 if _dest_px is not None and _dest_py is not None:
                                     pyautogui.mouseDown(_px, _py)
                                     time.sleep(0.05)
-                                    pyautogui.moveTo(_dest_px, _dest_py, duration=0.3)
+                                    if os.name == "nt":
+                                        try:
+                                            import ctypes
+                                            clamped_dest_x = max(monitor["left"] + 2, min(monitor["left"] + monitor["width"] - 2, int(_dest_px)))
+                                            clamped_dest_y = max(monitor["top"] + 2, min(monitor["top"] + monitor["height"] - 2, int(_dest_py)))
+                                            ctypes.windll.user32.SetCursorPos(clamped_dest_x, clamped_dest_y)
+                                        except Exception:
+                                            pass
+                                    try:
+                                        pyautogui.moveTo(_dest_px, _dest_py, duration=0.3)
+                                    except Exception:
+                                        pass
                                     time.sleep(0.05)
                                     pyautogui.mouseUp()
                                 else:
