@@ -94,6 +94,12 @@ export function generateMarkdownReport({ chat, project, artifacts = [] }) {
       md += `### 🧠 Castor Planner (Step ${idx + 1})\n${m.text}\n\n`;
     } else if (m.role === 'diff') {
       md += `### 📝 Code Modification (Step ${idx + 1})\n\`\`\`diff\n${m.diff}\n\`\`\`\n\n`;
+    } else if (m.role === 'visual_action') {
+      md += `### 🎯 Visual Interaction (Step ${idx + 1}): ${(m.action || 'CLICK').toUpperCase()} '${m.target || 'Element'}'\n`;
+      md += `- **Target Coordinates:** (${m.x}, ${m.y})\n`;
+      if (m.bbox && m.bbox[2] > 0) md += `- **Element BBox:** ${m.bbox[2]}×${m.bbox[3]}px\n`;
+      if (m.destination) md += `- **Drag Destination:** ${m.destination}\n`;
+      md += `\n`;
     } else {
       md += `> **[${role}]**: ${m.text}\n\n`;
     }
@@ -183,6 +189,23 @@ export function generateHtmlReport({ chat, project, artifacts = [] }) {
               <span class="card-time">#${idx + 1}</span>
             </div>
             <div class="diff-container">${diffLines}</div>
+          </div>`;
+      }
+      if (m.role === 'visual_action') {
+        return `
+          <div class="timeline-card visual-card">
+            <div class="card-header">
+              <span class="badge visual-badge">🎯 ${(m.action || 'CLICK').toUpperCase()}: ${escapeHtml(m.target || 'Element')}</span>
+              <span class="card-time">(${m.x}, ${m.y})</span>
+            </div>
+            <div class="visual-body">
+              ${m.crop ? `<img src="${m.crop}" alt="Target Element Crop" class="visual-crop-img" />` : ''}
+              <div class="visual-info">
+                <div class="visual-title">Target: <strong>${escapeHtml(m.target || '')}</strong></div>
+                ${m.destination ? `<div class="visual-dest">Destination: <strong>${escapeHtml(m.destination)}</strong></div>` : ''}
+                <div class="visual-meta">Screen Target: (${m.x}, ${m.y})${m.bbox && m.bbox[2] > 0 ? ` • Element BBox: ${m.bbox[2]}×${m.bbox[3]}px` : ''}</div>
+              </div>
+            </div>
           </div>`;
       }
       // System or status
@@ -495,6 +518,37 @@ export function generateHtmlReport({ chat, project, artifacts = [] }) {
       background: rgba(16, 185, 129, 0.2);
       color: #34d399;
       border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+    .visual-badge {
+      background: rgba(59, 130, 246, 0.2);
+      color: #60a5fa;
+      border: 1px solid rgba(59, 130, 246, 0.3);
+    }
+    .visual-body {
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .visual-crop-img {
+      width: 90px;
+      height: 90px;
+      object-fit: contain;
+      background: #000;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      flex-shrink: 0;
+    }
+    .visual-info {
+      font-size: 0.85rem;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .visual-meta {
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 0.78rem;
+      color: var(--text-muted);
     }
     .card-time {
       font-family: monospace;

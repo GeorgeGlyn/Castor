@@ -271,6 +271,81 @@ def get_monitors_info() -> list[dict]:
         return monitors
 
 
+def generate_element_crop(
+    img: Image.Image,
+    px: int,
+    py: int,
+    bbox: list[int] | None,
+    monitor: dict,
+    crop_size: int = 220,
+) -> str | None:
+    """
+    Extracts a high-definition localized element crop centered around the target
+    with visual highlight annotations (bounding box & center crosshair) encoded as Base64 JPEG.
+    """
+    try:
+        from PIL import ImageDraw
+        import io
+        import base64
+
+        # Convert screen virtual coordinates to full_img local coordinates
+        local_x = px - monitor.get("left", 0)
+        local_y = py - monitor.get("top", 0)
+
+        local_bbox = None
+        if bbox and len(bbox) >= 4 and (bbox[2] > 0 or bbox[3] > 0):
+            local_bbox = [
+                bbox[0] - monitor.get("left", 0),
+                bbox[1] - monitor.get("top", 0),
+                bbox[2],
+                bbox[3],
+            ]
+
+        # Determine center of crop
+        if local_bbox and local_bbox[2] > 0 and local_bbox[3] > 0:
+            cx = local_bbox[0] + local_bbox[2] // 2
+            cy = local_bbox[1] + local_bbox[3] // 2
+            half_w = max(crop_size // 2, local_bbox[2] // 2 + 25)
+            half_h = max(crop_size // 2, local_bbox[3] // 2 + 25)
+        else:
+            cx, cy = local_x, local_y
+            half_w, half_h = crop_size // 2, crop_size // 2
+
+        x1 = max(0, cx - half_w)
+        y1 = max(0, cy - half_h)
+        x2 = min(img.width, cx + half_w)
+        y2 = min(img.height, cy + half_h)
+
+        if x2 <= x1 or y2 <= y1:
+            return None
+
+        cropped = img.crop((x1, y1, x2, y2)).copy()
+        draw = ImageDraw.Draw(cropped)
+
+        # Draw highlight border if bbox exists
+        if local_bbox and local_bbox[2] > 0 and local_bbox[3] > 0:
+            bx1 = max(0, local_bbox[0] - x1)
+            by1 = max(0, local_bbox[1] - y1)
+            bx2 = min(cropped.width - 1, local_bbox[0] + local_bbox[2] - x1)
+            by2 = min(cropped.height - 1, local_bbox[1] + local_bbox[3] - y1)
+            draw.rectangle([bx1, by1, bx2, by2], outline="#ef4444", width=2)
+
+        # Draw precision target dot/crosshair
+        dot_x = local_x - x1
+        dot_y = local_y - y1
+        if 0 <= dot_x < cropped.width and 0 <= dot_y < cropped.height:
+            r = 3
+            draw.ellipse([dot_x - r, dot_y - r, dot_x + r, dot_y + r], fill="#3b82f6", outline="#ffffff", width=1)
+
+        buf = io.BytesIO()
+        cropped.save(buf, format="JPEG", quality=85)
+        b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+        return f"data:image/jpeg;base64,{b64}"
+    except Exception as e:
+        print(f"Error generating visual crop: {e}")
+        return None
+
+
 # ── Agent Loop ────────────────────────────────────────────────────────────────
 
 class AgentLoop:
@@ -631,18 +706,22 @@ class AgentLoop:
         py: int = 0,
         bbox: list | None = None,
         is_micro: bool = False,
+        crop: str | None = None,
     ) -> bool:
         """Send a HITL request and wait for the user's decision. Returns True if approved."""
         self.hitl_approved = False
         self.hitl_approval_event.clear()
-        await self.websocket.send_json({
+        payload = {
             "type": "hitl_request",
             "action": action_label,
             "x": px,
             "y": py,
             "bbox": bbox or [0, 0, 0, 0],
             "is_micro_target": is_micro,
-        })
+        }
+        if crop:
+            payload["crop"] = crop
+        await self.websocket.send_json(payload)
         await self.hitl_approval_event.wait()
         return self.is_running and self.hitl_approved
 
@@ -2204,6 +2283,7 @@ class AgentLoop:
                             continue
 
                         await self.send_status(f"📍 Precision Target '{action_param.target}' at ({px}, {py}) [size: {p_bbox[2]}x{p_bbox[3]}px]")
+                        crop_b64 = generate_element_crop(full_img, px, py, p_bbox, monitor)
 
                         # Resolve drag destination
                         dest_px, dest_py = None, None
@@ -2224,7 +2304,7 @@ class AgentLoop:
                             if action_type == "drag" and action_param.destination:
                                 label += f" → {action_param.destination}"
                             approved = await self.request_hitl_approval(
-                                label, px=px, py=py, bbox=p_bbox, is_micro=is_micro
+                                label, px=px, py=py, bbox=p_bbox, is_micro=is_micro, crop=crop_b64
                             )
                             if not approved:
                                 break
@@ -2281,6 +2361,19 @@ class AgentLoop:
                             await self.send_status(f"🎯 Clicked on '{action_param.target}'")
                         elif _action_type == "drag":
                             await self.send_status(f"🎯 Dragged '{action_param.target}' → '{action_param.destination}'")
+
+                        if crop_b64:
+                            await self.send_json({
+                                "type": "visual_action",
+                                "action": _action_type,
+                                "target": action_param.target,
+                                "destination": action_param.destination if _action_type == "drag" else None,
+                                "x": px,
+                                "y": py,
+                                "bbox": p_bbox,
+                                "crop": crop_b64,
+                            })
+
                         await asyncio.sleep(1.0)  # Wait for UI to respond before next screen capture
 
 
