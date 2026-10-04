@@ -189,6 +189,284 @@ const DiffViewer = ({ diffData }) => {
   );
 };
 
+// ── Interactive Plan Review Card (Antigravity & Cursor Parity) ────────────
+const PlanReviewCard = ({
+  plan,
+  onProceed,
+  onRefine,
+  onOpenArtifact,
+  onUpdateTasks,
+}) => {
+  const [tasks, setTasks] = useState(() => plan.tasks || []);
+  const [editingTaskIdx, setEditingTaskIdx] = useState(null);
+  const [editingText, setEditingText] = useState('');
+  const [newTaskInput, setNewTaskInput] = useState('');
+  const [isAddingTask, setIsAddingTask] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(true);
+
+  // Sync tasks if plan updates
+  useEffect(() => {
+    if (plan.tasks && plan.tasks.length > 0) {
+      setTasks(plan.tasks);
+    }
+  }, [plan.tasks]);
+
+  const toggleTask = (index) => {
+    const updated = [...tasks];
+    const task = updated[index];
+    if (task.startsWith('✓ ') || task.startsWith('[x] ')) {
+      updated[index] = task.replace(/^(✓ |\[x\] )/, '');
+    } else {
+      updated[index] = `✓ ${task.replace(/^(\[ \] )/, '')}`;
+    }
+    setTasks(updated);
+    if (onUpdateTasks) onUpdateTasks(updated);
+  };
+
+  const removeTask = (index, e) => {
+    e.stopPropagation();
+    const updated = tasks.filter((_, i) => i !== index);
+    setTasks(updated);
+    if (onUpdateTasks) onUpdateTasks(updated);
+  };
+
+  const startEditTask = (index, currentText, e) => {
+    e.stopPropagation();
+    setEditingTaskIdx(index);
+    setEditingText(currentText.replace(/^(✓ |\[x\] |\[ \] )/, ''));
+  };
+
+  const saveEditTask = (index) => {
+    if (!editingText.trim()) return;
+    const updated = [...tasks];
+    const wasChecked = tasks[index].startsWith('✓ ') || tasks[index].startsWith('[x] ');
+    updated[index] = wasChecked ? `✓ ${editingText.trim()}` : editingText.trim();
+    setTasks(updated);
+    setEditingTaskIdx(null);
+    if (onUpdateTasks) onUpdateTasks(updated);
+  };
+
+  const handleAddTask = () => {
+    if (!newTaskInput.trim()) return;
+    const updated = [...tasks, `${tasks.length + 1}. ${newTaskInput.trim()}`];
+    setTasks(updated);
+    setNewTaskInput('');
+    setIsAddingTask(false);
+    if (onUpdateTasks) onUpdateTasks(updated);
+  };
+
+  return (
+    <div className="my-3 border border-emerald-500/40 rounded-2xl bg-[#121614] overflow-hidden shadow-2xl transition-all">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-emerald-950/60 via-zinc-900 to-zinc-900 border-b border-emerald-900/40">
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-sm shadow-sm">
+            📋
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                Plan Mode • Ready for Review
+              </span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 font-medium">
+                {tasks.length} Steps
+              </span>
+            </div>
+            <p className="text-xs text-zinc-300 font-medium truncate max-w-lg mt-0.5">
+              {plan.goal}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="text-xs text-zinc-400 hover:text-zinc-200 px-2 py-1 rounded hover:bg-zinc-800 transition-colors"
+          >
+            {isExpanded ? 'Collapse' : 'Expand'}
+          </button>
+        </div>
+      </div>
+
+      {isExpanded && (
+        <div className="p-4 space-y-4">
+          {/* Plan Text / Summary */}
+          {plan.planText && (
+            <div className="text-xs text-zinc-300 bg-zinc-900/80 border border-zinc-800 rounded-xl p-3.5 leading-relaxed whitespace-pre-wrap font-sans select-text max-h-60 overflow-y-auto">
+              {plan.planText}
+            </div>
+          )}
+
+          {/* Checklist of Milestones with inline editing */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs font-semibold text-zinc-300">
+              <span className="flex items-center gap-1.5">
+                <span>Execution Milestones &amp; Checklist</span>
+                <span className="text-[11px] text-zinc-500 font-normal hidden sm:inline">
+                  (Click text to customize or check/uncheck)
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsAddingTask(true)}
+                className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 hover:underline font-medium"
+              >
+                + Add Step
+              </button>
+            </div>
+
+            <div className="space-y-1.5">
+              {tasks.map((task, idx) => {
+                const isChecked = task.startsWith('✓ ') || task.startsWith('[x] ');
+                const cleanText = task.replace(/^(✓ |\[x\] |\[ \] )/, '');
+
+                if (editingTaskIdx === idx) {
+                  return (
+                    <div key={idx} className="flex items-center gap-2 p-1.5 bg-zinc-900 rounded-lg border border-emerald-500/50">
+                      <input
+                        type="text"
+                        value={editingText}
+                        onChange={(e) => setEditingText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') saveEditTask(idx);
+                          if (e.key === 'Escape') setEditingTaskIdx(null);
+                        }}
+                        autoFocus
+                        className="flex-1 bg-transparent text-xs text-zinc-100 outline-none px-2 py-1"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => saveEditTask(idx)}
+                        className="text-xs px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-medium"
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingTaskIdx(null)}
+                        className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div
+                    key={idx}
+                    onClick={() => toggleTask(idx)}
+                    className={`group flex items-center justify-between p-2 rounded-xl border text-xs cursor-pointer transition-all ${
+                      isChecked
+                        ? 'bg-emerald-950/20 border-emerald-900/40 text-emerald-300 line-through'
+                        : 'bg-zinc-900/60 border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900 text-zinc-200'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      <div
+                        className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 text-[10px] transition-colors ${
+                          isChecked
+                            ? 'bg-emerald-600 border-emerald-500 text-white'
+                            : 'border-zinc-650 bg-zinc-800'
+                        }`}
+                      >
+                        {isChecked ? '✓' : ''}
+                      </div>
+                      <span className="truncate select-text">{cleanText}</span>
+                    </div>
+
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={(e) => startEditTask(idx, task, e)}
+                        className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-zinc-200 text-[11px]"
+                        title="Edit step description"
+                      >
+                        ✏️
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => removeTask(idx, e)}
+                        className="p-1 hover:bg-red-900/40 rounded text-zinc-500 hover:text-red-400 text-[11px]"
+                        title="Remove step"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {isAddingTask && (
+                <div className="flex items-center gap-2 p-1.5 bg-zinc-900 rounded-lg border border-emerald-500/50 mt-1">
+                  <input
+                    type="text"
+                    value={newTaskInput}
+                    onChange={(e) => setNewTaskInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleAddTask();
+                      if (e.key === 'Escape') setIsAddingTask(false);
+                    }}
+                    placeholder="Enter new step description..."
+                    autoFocus
+                    className="flex-1 bg-transparent text-xs text-zinc-100 outline-none px-2 py-1 placeholder:text-zinc-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddTask}
+                    className="text-xs px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-medium"
+                  >
+                    Add
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingTask(false)}
+                    className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Action Confirmation Footer */}
+          <div className="pt-3 border-t border-zinc-800/80 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onProceed(tasks)}
+                className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-emerald-900/30 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98]"
+              >
+                <span>🚀 Proceed with Plan</span>
+                <span className="text-[10px] opacity-80 font-mono">(Switches to Agent)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onRefine(plan)}
+                className="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white rounded-xl text-xs font-medium border border-zinc-700/60 transition-colors flex items-center gap-1.5"
+              >
+                <span>✏️ Refine in Chat</span>
+              </button>
+            </div>
+
+            {onOpenArtifact && (
+              <button
+                type="button"
+                onClick={onOpenArtifact}
+                className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 font-mono hover:underline"
+              >
+                <span>📄 View Artifact</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ── Artifacts & Action Replay Sidecar Drawer (Antigravity Parity) ──────────
 const SidecarDrawer = ({ isOpen, onClose, artifacts, activeArtifact, onSelectArtifact, scratchpad }) => {
   const [activeTab, setActiveTab] = useState('artifacts');
@@ -374,6 +652,26 @@ function ChatWindow() {
   const [artifacts, setArtifacts] = useState([]);
   const [activeArtifact, setActiveArtifact] = useState(null);
   const [isArtifactsOpen, setIsArtifactsOpen] = useState(false);
+
+  // ── Mode Selector & Custom Agent State (Cursor Parity) ──────────────────────
+  const [composerMode, setComposerMode] = useState(() => {
+    try {
+      return localStorage.getItem('castor_composer_mode') || 'agent';
+    } catch {
+      return 'agent';
+    }
+  });
+  const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
+  const modeMenuRef = useRef(null);
+  const [isCustomAgentModalOpen, setIsCustomAgentModalOpen] = useState(false);
+  const [customInstructions, setCustomInstructions] = useState(() => {
+    try {
+      return localStorage.getItem('castor_custom_instructions') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [pendingPlan, setPendingPlan] = useState(null);
 
   // ── Antigravity Parity: Slash Commands Autocomplete State ───────────────────
   const [showSlashMenu, setShowSlashMenu] = useState(false);
@@ -943,6 +1241,34 @@ function ChatWindow() {
             },
           ],
         }));
+      } else if (data.type === 'plan_ready') {
+        const planTasks = data.scratchpad?.tasks || [];
+        const planObj = {
+          goal: data.goal,
+          planText: data.plan_text,
+          tasks: planTasks.length > 0 ? planTasks : [
+            '1. Analyze architectural requirements and codebase structure',
+            '2. Implement core components and logic',
+            '3. Add integration points and styling',
+            '4. Execute automated verification tests',
+          ],
+          scratchpad: data.scratchpad,
+          createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+        setPendingPlan(planObj);
+        updateActiveChat((chat) => ({
+          messages: [
+            ...(chat.messages || []),
+            {
+              role: 'plan_review',
+              plan: planObj,
+            },
+          ],
+        }));
+        playSoundCue('success');
+        if (window.electronAPI?.focusMainWindow) {
+          window.electronAPI.focusMainWindow();
+        }
       } else if (data.type === 'goal_complete') {
         setIsAgentRunning(false);
         setIsThinking(false);
@@ -1019,9 +1345,35 @@ function ChatWindow() {
       if (exportMenuRef.current && !exportMenuRef.current.contains(e.target)) {
         setIsExportMenuOpen(false);
       }
+      if (modeMenuRef.current && !modeMenuRef.current.contains(e.target)) {
+        setIsModeMenuOpen(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // ── Keyboard Shortcuts (Ctrl+Shift+I: Agent, Ctrl+Shift+P: Plan, Ctrl+Shift+A: Ask) ──
+  useEffect(() => {
+    const handleGlobalShortcuts = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
+        if (e.key === 'I' || e.key === 'i') {
+          e.preventDefault();
+          setComposerMode('agent');
+          playSoundCue('start_mic');
+        } else if (e.key === 'P' || e.key === 'p') {
+          e.preventDefault();
+          setComposerMode('plan');
+          playSoundCue('start_mic');
+        } else if (e.key === 'A' || e.key === 'a') {
+          e.preventDefault();
+          setComposerMode('ask');
+          playSoundCue('start_mic');
+        }
+      }
+    };
+    window.addEventListener('keydown', handleGlobalShortcuts);
+    return () => window.removeEventListener('keydown', handleGlobalShortcuts);
   }, []);
 
   const handleSelectMonitor = (monIndex) => {
@@ -1154,11 +1506,13 @@ function ChatWindow() {
   }, [messages]);
 
   // ── Actions ────────────────────────────────────────────────────────────────
-  const startGoal = () => {
+  const startGoal = (overrideGoalText = null, overrideMode = null) => {
     const ws = wsRef.current;
-    if (!ws || !goal.trim() || isAgentRunning) return;
+    const rawGoal = overrideGoalText !== null ? overrideGoalText : goal;
+    if (!ws || !rawGoal.trim() || isAgentRunning) return;
 
-    const goalText = goal.trim();
+    const goalText = rawGoal.trim();
+    const effectiveMode = overrideMode || composerMode;
     currentThoughtRef.current = '';
 
     // Extract recent prior conversation history for multi-turn context
@@ -1184,7 +1538,7 @@ function ChatWindow() {
       return {
         title: newTitle,
         project: chat.project || activeProject,
-        messages: [...(chat.messages || []), { role: 'user', text: goalText }],
+        messages: [...(chat.messages || []), { role: 'user', text: goalText, mode: effectiveMode }],
         scratchpad: null,
       };
     });
@@ -1197,13 +1551,66 @@ function ChatWindow() {
         hitl_enabled: hitlEnabled,
         project_path: activeProject?.path || null,
         history: priorHistory,
+        mode: effectiveMode,
+        custom_instructions: customInstructions,
       })
     );
-    setGoal('');
+    if (overrideGoalText === null) {
+      setGoal('');
+    }
     setIsAgentRunning(true);
     setIsThinking(true);
     setThinkingSeconds(0);
-    setAgentStatus('Connecting to agent and analyzing repository...');
+    const modeStatus = effectiveMode === 'plan'
+      ? 'Analyzing repository and formulating plan...'
+      : effectiveMode === 'ask'
+      ? 'Consulting code and preparing response...'
+      : 'Connecting to agent and analyzing repository...';
+    setAgentStatus(modeStatus);
+  };
+
+  const handleProceedWithPlan = (customizedTasks) => {
+    setComposerMode('agent');
+    const tasksListStr = customizedTasks
+      .map((t, idx) => `${idx + 1}. ${t.replace(/^(✓ |\[x\] |\[ \] )/, '')}`)
+      .join('\n');
+    const executionGoal = `Proceed with execution of the verified plan and implement all milestones:\n${tasksListStr}`;
+
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        action: 'update_scratchpad',
+        scratchpad: {
+          current_sub_task: customizedTasks[0] || 'Executing plan milestones',
+          tasks: customizedTasks,
+          completed_steps: [],
+        },
+      }));
+    }
+
+    startGoal(executionGoal, 'agent');
+  };
+
+  const handleRefinePlan = (plan) => {
+    setComposerMode('plan');
+    setGoal('Please adjust the plan: ');
+  };
+
+  const handleOpenPlanArtifact = () => {
+    setIsArtifactsOpen(true);
+  };
+
+  const handleUpdatePlanTasks = (newTasks) => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        action: 'update_scratchpad',
+        scratchpad: {
+          current_sub_task: newTasks[0] || '',
+          tasks: newTasks,
+        },
+      }));
+    }
   };
 
   const abortGoal = () => {
@@ -1957,6 +2364,25 @@ function ChatWindow() {
                 );
               }
 
+              if (msg.role === 'plan_review') {
+                return (
+                  <div key={i} className="flex justify-start max-w-3xl my-3">
+                    <div className="w-8 h-8 rounded-full bg-emerald-600/20 border border-emerald-500/40 flex items-center justify-center mr-3 mt-1 flex-shrink-0 text-sm shadow-sm">
+                      📋
+                    </div>
+                    <div className="flex-1 overflow-hidden">
+                      <PlanReviewCard
+                        plan={msg.plan}
+                        onProceed={(customTasks) => handleProceedWithPlan(customTasks)}
+                        onRefine={(p) => handleRefinePlan(p)}
+                        onOpenArtifact={() => handleOpenPlanArtifact()}
+                        onUpdateTasks={(newTasks) => handleUpdatePlanTasks(newTasks)}
+                      />
+                    </div>
+                  </div>
+                );
+              }
+
               return null;
             })}
 
@@ -2233,7 +2659,13 @@ function ChatWindow() {
                 value={goal}
                 onChange={handleGoalChange}
                 onKeyDown={handleKeyDown}
-                placeholder={activeProject ? `Message Castor in ${activeProject.name}... (Type / for commands)` : 'Message Castor... (Type / for commands)'}
+                placeholder={
+                  composerMode === 'plan'
+                    ? (activeProject ? `Plan feature in ${activeProject.name}... (Type / for commands)` : 'Plan feature or requirement before execution... (Type / for commands)')
+                    : composerMode === 'ask'
+                    ? (activeProject ? `Ask question about ${activeProject.name}... (Type / for commands)` : 'Ask a question or request code explanation... (Type / for commands)')
+                    : (activeProject ? `Message Castor in ${activeProject.name}... (Type / for commands)` : 'Message Castor... (Type / for commands)')
+                }
                 disabled={!isConnected || isAgentRunning}
                 className="w-full bg-transparent text-zinc-200 px-4 py-3 resize-none outline-none text-sm placeholder:text-zinc-500 disabled:opacity-50"
               />
@@ -2241,6 +2673,121 @@ function ChatWindow() {
               <div className="flex items-center justify-between px-3 pb-2.5 pt-1">
                 {/* Toggles & Actions */}
                 <div className="flex items-center gap-3">
+                  {/* Mode Selector Capsule & Dropdown (Cursor-style: Agent, Ask, Plan) */}
+                  <div className="relative" ref={modeMenuRef}>
+                    <button
+                      type="button"
+                      onClick={() => setIsModeMenuOpen(!isModeMenuOpen)}
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-all ${
+                        composerMode === 'agent'
+                          ? 'bg-blue-600/15 border-blue-500/40 text-blue-300 hover:bg-blue-600/25'
+                          : composerMode === 'plan'
+                          ? 'bg-emerald-600/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-600/25'
+                          : 'bg-purple-600/15 border-purple-500/40 text-purple-300 hover:bg-purple-600/25'
+                      }`}
+                      title="Select AI execution mode (Ctrl+Shift+I: Agent, Ctrl+Shift+P: Plan, Ctrl+Shift+A: Ask)"
+                    >
+                      {composerMode === 'agent' && (
+                        <>
+                          <span className="font-mono text-[11px] font-bold">&lt;/&gt;</span>
+                          <span>Agent</span>
+                        </>
+                      )}
+                      {composerMode === 'plan' && (
+                        <>
+                          <span>📋</span>
+                          <span>Plan</span>
+                        </>
+                      )}
+                      {composerMode === 'ask' && (
+                        <>
+                          <span>💬</span>
+                          <span>Ask</span>
+                        </>
+                      )}
+                      <svg className={`w-3 h-3 text-zinc-400 transition-transform ${isModeMenuOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+
+                    {/* Mode Dropdown Menu matching user's screenshot exactly */}
+                    {isModeMenuOpen && (
+                      <div className="absolute bottom-full left-0 mb-1.5 w-64 bg-[#1e1e24] border border-[#2e2e38] rounded-xl shadow-2xl py-1 z-50 animate-in fade-in zoom-in-95 duration-100 text-zinc-200">
+                        {/* Agent Option */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setComposerMode('agent');
+                            setIsModeMenuOpen(false);
+                            playSoundCue('start_mic');
+                          }}
+                          className={`w-full flex items-center justify-between px-3.5 py-2 text-xs transition-colors hover:bg-white/5 ${
+                            composerMode === 'agent' ? 'bg-white/10 text-white font-medium' : 'text-zinc-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span className="font-mono text-xs text-blue-400 font-bold w-4 text-center">&lt;/&gt;</span>
+                            <span>Agent</span>
+                          </div>
+                          <span className="text-[10px] font-mono text-zinc-500">Ctrl+Shift+I</span>
+                        </button>
+
+                        {/* Ask Option */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setComposerMode('ask');
+                            setIsModeMenuOpen(false);
+                            playSoundCue('start_mic');
+                          }}
+                          className={`w-full flex items-center justify-between px-3.5 py-2 text-xs transition-colors hover:bg-white/5 ${
+                            composerMode === 'ask' ? 'bg-white/10 text-white font-medium' : 'text-zinc-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-xs text-purple-400 w-4 text-center">💬</span>
+                            <span>Ask</span>
+                          </div>
+                          <span className="text-[10px] font-mono text-zinc-500">Read-only</span>
+                        </button>
+
+                        {/* Plan Option */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setComposerMode('plan');
+                            setIsModeMenuOpen(false);
+                            playSoundCue('start_mic');
+                          }}
+                          className={`w-full flex items-center justify-between px-3.5 py-2 text-xs transition-colors hover:bg-white/5 ${
+                            composerMode === 'plan' ? 'bg-white/10 text-white font-medium' : 'text-zinc-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-xs text-emerald-400 w-4 text-center">📋</span>
+                            <span>Plan</span>
+                          </div>
+                          <span className="text-[10px] font-mono text-zinc-500">Interactive</span>
+                        </button>
+
+                        <div className="border-t border-[#2e2e38] my-1" />
+
+                        {/* Configure Custom Agent Option */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsModeMenuOpen(false);
+                            setIsCustomAgentModalOpen(true);
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs text-zinc-300 hover:text-white hover:bg-white/5 transition-colors"
+                        >
+                          <span className="text-xs text-zinc-400 w-4 text-center">⚙️</span>
+                          <span>Configure Custom Agent...</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
                   <label className="flex items-center gap-2 cursor-pointer group select-none">
                     <div className="relative flex items-center">
                       <input
@@ -2297,9 +2844,22 @@ function ChatWindow() {
                   </button>
 
                   <button
-                    onClick={startGoal}
+                    onClick={() => startGoal()}
                     disabled={!isConnected || !goal.trim() || isAgentRunning}
-                    className="bg-zinc-200 hover:bg-white text-zinc-900 disabled:bg-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed p-1.5 rounded-lg transition-colors flex items-center justify-center shadow-sm"
+                    className={`p-1.5 rounded-lg transition-all flex items-center justify-center shadow-sm disabled:bg-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed ${
+                      composerMode === 'plan'
+                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                        : composerMode === 'ask'
+                        ? 'bg-purple-600 hover:bg-purple-500 text-white'
+                        : 'bg-zinc-200 hover:bg-white text-zinc-900'
+                    }`}
+                    title={
+                      composerMode === 'plan'
+                        ? 'Generate Plan (Plan Mode)'
+                        : composerMode === 'ask'
+                        ? 'Send Question (Ask Mode)'
+                        : 'Start Autonomous Goal (Agent Mode)'
+                    }
                   >
                     {isAgentRunning ? (
                       <div className="w-5 h-5 flex items-center justify-center gap-0.5">
@@ -2326,6 +2886,119 @@ function ChatWindow() {
           </div>
         </div>
       </div>
+
+      {/* Configure Custom Agent Modal */}
+      {isCustomAgentModalOpen && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-[#18181b] border border-zinc-750 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150">
+            <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/60">
+              <div className="flex items-center gap-2.5">
+                <span className="text-lg">⚙️</span>
+                <div>
+                  <h3 className="text-sm font-semibold text-zinc-100">Configure Custom Agent</h3>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    Set persistent rules, system instructions, and coding standards for Castor.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsCustomAgentModalOpen(false)}
+                className="text-zinc-400 hover:text-zinc-200 p-1.5 rounded-lg hover:bg-zinc-800 transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {/* Preset Chips */}
+              <div>
+                <label className="text-xs font-semibold text-zinc-300 block mb-2">
+                  Quick Rule Presets (Click to insert):
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { label: '🧪 Strict Testing', rule: 'Always run automated tests or test build verification before emitting done.' },
+                    { label: '🎯 Minimal Diffs', rule: 'Keep file edits minimal and surgical. Never rewrite entire files or discard existing comments.' },
+                    { label: '💎 TypeScript Strict', rule: 'Use strict TypeScript types. Avoid `any` types and declare explicit interfaces.' },
+                    { label: '🛡️ Safety Confirmation', rule: 'Never delete files, drop database tables, or overwrite configurations without asking.' },
+                  ].map((preset, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => {
+                        setCustomInstructions((prev) => {
+                          const separator = prev.trim() ? '\n' : '';
+                          return `${prev}${separator}- ${preset.rule}`;
+                        });
+                      }}
+                      className="text-[11px] px-2.5 py-1 rounded-lg bg-zinc-850 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-750 transition-colors"
+                    >
+                      + {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Textarea */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-semibold text-zinc-300">
+                    Custom Agent Instructions:
+                  </label>
+                  <span className="text-[10px] font-mono text-zinc-500">
+                    Injected into planner system prompt
+                  </span>
+                </div>
+                <textarea
+                  rows={6}
+                  value={customInstructions}
+                  onChange={(e) => setCustomInstructions(e.target.value)}
+                  placeholder="e.g. Always write clean modular functions, follow PEP 8 for Python, prioritize Tailwind CSS for styling..."
+                  className="w-full bg-[#121216] border border-zinc-800 rounded-xl p-3 text-xs text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-blue-500/80 transition-colors font-mono leading-relaxed resize-none"
+                />
+              </div>
+            </div>
+
+            <div className="px-5 py-3.5 bg-zinc-900/60 border-t border-zinc-800 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomInstructions('');
+                  try {
+                    localStorage.removeItem('castor_custom_instructions');
+                  } catch {}
+                }}
+                className="text-xs text-zinc-500 hover:text-red-400 transition-colors"
+              >
+                Reset to Default
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsCustomAgentModalOpen(false)}
+                  className="px-3.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      localStorage.setItem('castor_custom_instructions', customInstructions);
+                    } catch {}
+                    setIsCustomAgentModalOpen(false);
+                    playSoundCue('success');
+                  }}
+                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold shadow-md transition-colors"
+                >
+                  Save Instructions
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Visual Crop Lightbox Modal */}
       {selectedCropModal && (

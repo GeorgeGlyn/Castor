@@ -137,10 +137,19 @@ async def websocket_endpoint(websocket: WebSocket):
                 hitl_enabled = data.get("hitl_enabled", False)
                 project_path = data.get("project_path")
                 history = data.get("history", [])
+                mode = data.get("mode", "agent")
+                custom_instructions = data.get("custom_instructions")
                 if goal:
                     async def run_safe():
                         try:
-                            await agent_loop.run(goal, hitl_enabled, project_path=project_path, history=history)
+                            await agent_loop.run(
+                                goal,
+                                hitl_enabled,
+                                project_path=project_path,
+                                history=history,
+                                mode=mode,
+                                custom_instructions=custom_instructions,
+                            )
                         except Exception as e:
                             import traceback
                             traceback.print_exc()
@@ -148,6 +157,12 @@ async def websocket_endpoint(websocket: WebSocket):
                             await manager.send_message({"type": "goal_complete"}, websocket)
 
                     asyncio.create_task(run_safe())
+
+            elif action == "update_scratchpad":
+                new_scratchpad = data.get("scratchpad")
+                if new_scratchpad and isinstance(new_scratchpad, dict):
+                    agent_loop.current_scratchpad = new_scratchpad
+                    await manager.send_message({"type": "scratchpad_updated", "scratchpad": new_scratchpad}, websocket)
 
             elif action == "abort":
                 agent_loop.stop()

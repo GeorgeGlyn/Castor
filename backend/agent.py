@@ -733,6 +733,8 @@ class AgentLoop:
         hitl_enabled: bool,
         project_path: str | None = None,
         history: list[dict] | None = None,
+        mode: str = "agent",
+        custom_instructions: str | None = None,
     ):
         self.current_project_path = project_path
         if not self.current_project_path:
@@ -764,10 +766,13 @@ class AgentLoop:
 
         self.is_running = True
 
-        # ── Slash Command Pre-processing ──────────────────────────────────────
+        # ── Slash Command & Mode Pre-processing ───────────────────────────────
         clean_goal = goal.strip()
         slash_mode_instruction = ""
         max_steps_override = MAX_STEPS
+
+        # Normalize execution mode
+        active_mode = (mode or "agent").strip().lower()
 
         if clean_goal.startswith("/learn"):
             learn_text = clean_goal.replace("/learn", "", 1).strip()
@@ -791,16 +796,34 @@ class AgentLoop:
             await self.websocket.send_json({"type": "goal_complete"})
             return
 
-        elif clean_goal.startswith("/plan"):
-            clean_goal = clean_goal.replace("/plan", "", 1).strip()
+        elif clean_goal.startswith("/plan") or active_mode == "plan":
+            if clean_goal.startswith("/plan"):
+                clean_goal = clean_goal.replace("/plan", "", 1).strip()
+            active_mode = "plan"
+            max_steps_override = 6
             slash_mode_instruction = (
-                "\n=== ACTIVATED MODE: /plan ===\n"
-                "1. BEFORE executing changes, you MUST create a comprehensive project plan artifact using 'create_artifact' "
-                "(title: 'Project Architecture & Plan', artifact_type: 'markdown').\n"
-                "2. Include architecture diagrams, step-by-step milestones, edge cases, and file layout.\n"
-                "3. Ensure the plan artifact is written before editing or compiling code.\n"
+                "\n=== CRITICAL MODE ACTIVATION: PLAN (READ-ONLY ARCHITECTURE & TASK PLANNING) ===\n"
+                "1. Your EXCLUSIVE objective in this turn is to RESEARCH, ARCHITECT, and PLAN the requested feature/requirement.\n"
+                "2. You may use read-only inspection tools: 'view_file', 'list_dir', 'grep_search', 'search_web', 'read_url_content'.\n"
+                "3. ABSOLUTE PROHIBITION: DO NOT modify any code or files ('write_to_file', 'replace_file_content', 'multi_replace_file_content') and DO NOT perform any mouse clicks/drags or UI automation!\n"
+                "4. You MUST formulate a detailed implementation plan:\n"
+                "   - Create a comprehensive project plan artifact using 'create_artifact' (title: 'Implementation Plan', artifact_type: 'markdown'). Include architecture details, files to create/edit, and verification criteria.\n"
+                "   - Define clear, sequential, numbered milestones in your scratchpad 'tasks' (e.g. '1. Add button component', '2. Implement state handler', '3. Run test verification').\n"
+                "   - In 'message_to_user', provide an executive summary of the plan, the exact files you plan to touch, and tell the user they can review the tasks, customize them if needed, and click 'Proceed with Plan' to begin execution.\n"
+                "5. Conclude your planning session by emitting action 'done'. Do NOT proceed to implementation yourself.\n"
             )
-            await self.send_status("📋 Mode [/plan]: Full architecture plan artifact will be formulated first.")
+            await self.send_status("📋 Mode [Plan]: Formulating architecture & implementation plan for review...")
+
+        elif active_mode == "ask":
+            max_steps_override = 4
+            slash_mode_instruction = (
+                "\n=== CRITICAL MODE ACTIVATION: ASK (READ-ONLY CONSULTATION & CODE EXPLANATION) ===\n"
+                "1. Your objective is to answer the user's question, explain code or architecture, or diagnose issues.\n"
+                "2. You may inspect the workspace using read-only tools: 'view_file', 'list_dir', 'grep_search', 'search_web'.\n"
+                "3. ABSOLUTE PROHIBITION: DO NOT modify any files and DO NOT automate desktop clicks or OS actions.\n"
+                "4. Deliver your complete, thorough Markdown answer directly in 'message_to_user', and finish with action 'done'.\n"
+            )
+            await self.send_status("💬 Mode [Ask]: Answering question and explaining architecture...")
 
         elif clean_goal.startswith("/goal"):
             clean_goal = clean_goal.replace("/goal", "", 1).strip()
@@ -820,6 +843,17 @@ class AgentLoop:
                 "to interview the user, clarify architecture decisions, resolve trade-offs, and align on scope.\n"
             )
             await self.send_status("🎯 Mode [/grill-me]: Conducting interview to align on design decisions...")
+
+        else:
+            await self.send_status("🤖 Mode [Agent]: Autonomous desktop & code execution enabled.")
+
+        # User custom rules injection
+        custom_rules_instruction = ""
+        if custom_instructions and custom_instructions.strip():
+            custom_rules_instruction = (
+                f"\n\n=== USER CUSTOM INSTRUCTIONS & RULES ===\n"
+                f"{custom_instructions.strip()}\n"
+            )
 
         await self.send_status(f"🚀 Initializing goal: {clean_goal}")
         await self.send_status("🔍 Analyzing workspace and checking domain skills...")
@@ -952,7 +986,10 @@ class AgentLoop:
             "   - NEVER leave 'thought_process' empty!\n"
         )
 
-        planner_system_instruction += slash_mode_instruction
+        planner_system_instruction += (
+            slash_mode_instruction
+            + custom_rules_instruction
+        )
 
         # Maintain a rolling conversation history for context, incorporating previous turns if available
         base_history = []
@@ -1226,6 +1263,30 @@ class AgentLoop:
 
                     action_type = (action_param.action or "").strip().lower()
                     turn_action_types.append(action_type)
+
+                    # ── Mode Safeguards (Plan & Ask are strictly non-mutating) ──
+                    if active_mode in ["plan", "ask"]:
+                        if action_type in ["click", "drag", "type", "hotkey"]:
+                            await self.send_status(f"🛡️ Safeguard: Desktop GUI action '{action_type}' blocked in [{active_mode.upper()}] mode (read-only).")
+                            rolling_history.append(types.Content(
+                                role="user",
+                                parts=[types.Part(text=(
+                                    f"BLOCKED: Desktop GUI action '{action_type}' is disabled in {active_mode.upper()} mode. "
+                                    f"Do NOT automate mouse/keyboard actions. In {active_mode.upper()} mode, inspect code or formulate plans, then emit 'done'."
+                                ))]
+                            ))
+                            continue
+                        elif action_type in ["write_to_file", "replace_file_content", "multi_replace_file_content"]:
+                            await self.send_status(f"🛡️ Safeguard: File write action '{action_type}' blocked in [{active_mode.upper()}] mode (read-only).")
+                            rolling_history.append(types.Content(
+                                role="user",
+                                parts=[types.Part(text=(
+                                    f"BLOCKED: File write '{action_type}' is disabled in {active_mode.upper()} mode. "
+                                    f"Do NOT write files directly. Document the proposed changes in your plan and tasks, then emit 'done'."
+                                ))]
+                            ))
+                            continue
+
                     await self.send_status(f"▶ Executing: {action_type.upper()}" + (f" — {action_param.target or action_param.text or ''}" if (action_param.target or action_param.text) else ""))
 
                     # ── done ─────────────────────────────────────────────────
@@ -1272,7 +1333,18 @@ class AgentLoop:
                                 "type": "agent_response",
                                 "text": done_text,
                             })
-                        await self.send_status("✅ Goal achieved!")
+
+                        if active_mode == "plan":
+                            await self.websocket.send_json({
+                                "type": "plan_ready",
+                                "plan_text": done_text,
+                                "goal": clean_goal,
+                                "scratchpad": self.current_scratchpad,
+                            })
+                            await self.send_status("📋 Plan ready for review! Click 'Proceed with Plan' to execute.")
+                        else:
+                            await self.send_status("✅ Goal achieved!")
+
                         await self.websocket.send_json({"type": "goal_complete"})
                         self.is_running = False
                         break
