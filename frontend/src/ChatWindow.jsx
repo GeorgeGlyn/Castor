@@ -319,6 +319,35 @@ function ChatWindow() {
   const [activeSkills, setActiveSkills] = useState([]);
   const [isTasksExpanded, setIsTasksExpanded] = useState(true);
 
+  // ── Always on Top Window Pin ──────────────────────────────────────────────
+  const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(() => {
+    try {
+      return localStorage.getItem('castor_always_on_top') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleAlwaysOnTop = () => {
+    setIsAlwaysOnTop((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('castor_always_on_top', String(next));
+      } catch {}
+      if (window.electronAPI?.setAlwaysOnTop) {
+        window.electronAPI.setAlwaysOnTop(next);
+      }
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (window.electronAPI?.setAlwaysOnTop) {
+      window.electronAPI.setAlwaysOnTop(isAlwaysOnTop);
+    }
+  }, []);
+
+
   const wsRef = useRef(null);
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef(null);
@@ -605,9 +634,18 @@ function ChatWindow() {
         ) {
           setIsThinking(false);
         }
+        // Relay live agent status to the floating HUD
+        if (window.electronAPI?.updateHUD) {
+          window.electronAPI.updateHUD({
+            isRunning: true,
+            status: data.message,
+            stepCount: activeChat?.scratchpad?.completed_steps?.length || 0,
+          });
+        }
         updateActiveChat((chat) => ({
           messages: [...(chat.messages || []), { role: 'system', text: data.message }],
         }));
+
       } else if (data.type === 'thought_chunk') {
         currentThoughtRef.current += data.text;
         setIsThinking(false);
@@ -641,6 +679,10 @@ function ChatWindow() {
         setTimeout(() => {
           messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
         }, 50);
+        // Smart focus: bring Castor window to front so user sees approval request immediately
+        if (window.electronAPI?.focusMainWindow) {
+          window.electronAPI.focusMainWindow();
+        }
         if (window.electronAPI) {
           const hasVisualTarget = (data.bbox && (data.bbox[2] > 0 || data.bbox[3] > 0)) || (data.x > 0 || data.y > 0);
           if (hasVisualTarget) {
@@ -659,6 +701,10 @@ function ChatWindow() {
         setTimeout(() => {
           messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
         }, 50);
+        // Smart focus: bring Castor window to front so user sees question modal immediately
+        if (window.electronAPI?.focusMainWindow) {
+          window.electronAPI.focusMainWindow();
+        }
       } else if (data.type === 'file_diff') {
         updateActiveChat((chat) => ({
           messages: [...(chat.messages || []), { role: 'diff', diff: data.diff }],
@@ -686,7 +732,14 @@ function ChatWindow() {
         setHitlRequest(null);
         setQuestionModal(null);
         setAgentStatus('Goal complete!');
+        if (window.electronAPI?.updateHUD) {
+          window.electronAPI.updateHUD({ isRunning: false, status: '' });
+        }
+        if (window.electronAPI?.focusMainWindow) {
+          window.electronAPI.focusMainWindow();
+        }
       }
+
     };
 
     socket.onclose = () => {
@@ -997,6 +1050,19 @@ function ChatWindow() {
 
           <div className="flex items-center gap-2">
             <button
+              onClick={toggleAlwaysOnTop}
+              className={`text-xs px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm border ${
+                isAlwaysOnTop
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30'
+                  : 'text-zinc-400 hover:text-zinc-200 bg-zinc-850 hover:bg-zinc-800 border-zinc-750'
+              }`}
+              title={isAlwaysOnTop ? 'Castor stays floating above other apps (Click to unpin)' : 'Pin Castor to stay always on top of other apps'}
+            >
+              <span className="text-xs">{isAlwaysOnTop ? '📌' : '📍'}</span>
+              <span>{isAlwaysOnTop ? 'Pinned' : 'Pin Top'}</span>
+            </button>
+
+            <button
               onClick={() => setIsArtifactsOpen((prev) => !prev)}
               className={`text-xs px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm border ${
                 artifacts.length > 0
@@ -1024,6 +1090,7 @@ function ChatWindow() {
             </button>
           </div>
         </header>
+
 
         {/* Antigravity-Style Tasks & Roadmap Panel */}
         {scratchpad && (
