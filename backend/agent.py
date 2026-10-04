@@ -143,7 +143,8 @@ class ReplacementChunkItem(BaseModel):
 
 
 class ActionParams(BaseModel):
-    action: str        # "click" | "drag" | "type" | "hotkey" | "scroll" | "bash" | "done" | "skill" | "run_skill_script" | "view_file" | "write_to_file" | "replace_file_content" | "multi_replace_file_content" | "list_dir" | "grep_search" | "search_web" | "read_url_content" | "list_windows" | "focus_window" | "check_unity_diagnostics" | "schedule" | "create_checkpoint" | "restore_checkpoint" | "list_checkpoints" | "generate_image_asset" | "run_tests" | "ask_question" | "manage_task" | "save_knowledge" | "get_knowledge" | "invoke_subagent" | "create_artifact" | "update_artifact"
+    action: str        # "click" | "drag" | "type" | "hotkey" | "scroll" | "bash" | "done" | "skill" | "run_skill_script" | "view_file" | "write_to_file" | "replace_file_content" | "multi_replace_file_content" | "list_dir" | "grep_search" | "search_web" | "read_url_content" | "list_windows" | "focus_window" | "check_unity_diagnostics" | "schedule" | "create_checkpoint" | "restore_checkpoint" | "list_checkpoints" | "generate_image_asset" | "run_tests" | "read_clipboard" | "set_clipboard" | "ask_question" | "manage_task" | "save_knowledge" | "get_knowledge" | "invoke_subagent" | "create_artifact" | "update_artifact"
+
     target: Optional[str] = None       # Semantic description for click/drag/scroll, or skill name for run_skill_script
     destination: Optional[str] = None  # Semantic description for drag end
     text: Optional[str] = None         # For type / bash / skill name / script name / URL / query, OR full detailed report/answer for 'done'
@@ -696,7 +697,9 @@ class AgentLoop:
             "   - 'restore_checkpoint': cleanly roll back workspace to a previous checkpoint if code generation fails or tests break. Set 'checkpoint_id' (or 'latest').\n"
             "   - 'list_checkpoints': view all available safety checkpoints in this workspace.\n"
             "   - 'generate_image_asset': create clean visual assets for any project (PNG or SVG). Supports dual-mode generation: 'image_mode' ('ai' for Google Nano Banana / Gemini image generation with prompt, 'python' for zero-quota local Pillow/SVG generation, or 'ask' to display an interactive modal asking the user's preference). Set 'path', 'prompt' (for AI), 'asset_type' ('icon' | 'pixel_sprite' | 'texture' | 'badge' | 'gradient' | 'svg'), 'width', 'height', and optional 'preset'/'label'. If AI quota is exhausted, it automatically falls back to local Python generation!\n"
-            "   - 'run_tests': execute automated tests or build verification for ANY project type (Python, JavaScript/TypeScript, Go, Rust, C#/.NET) with automatic framework detection or custom 'test_command'. When tests fail, you can inspect tracebacks, surgical-edit files with 'replace_file_content', or set 'auto_fix'=True for automated checkpoint-and-repair iterations!\n\n"
+            "   - 'run_tests': execute automated tests or build verification for ANY project type (Python, JavaScript/TypeScript, Go, Rust, C#/.NET) with automatic framework detection or custom 'test_command'. When tests fail, you can inspect tracebacks, surgical-edit files with 'replace_file_content', or set 'auto_fix'=True for automated checkpoint-and-repair iterations!\n"
+            "   - 'read_clipboard': instantly read text currently on the operating system clipboard (e.g. copied errors, links, code snippets, tokens) without needing screen OCR.\n"
+            "   - 'set_clipboard': write text or code directly into the operating system clipboard. Set 'text' or 'content'.\n\n"
             "   [Skill System & Executables]\n"
             "   - 'skill': activate a domain skill into your persistent system instructions. Set 'text' to skill name (e.g. 'unity', 'windows-power').\n"
             "   - 'run_skill_script': execute a pre-tested helper script from a skill. Set 'target' to skill name and 'text' to script filename.\n\n"
@@ -1854,9 +1857,56 @@ class AgentLoop:
                         ))
                         await asyncio.sleep(0.3)
 
+                    # ── read_clipboard ───────────────────────────────────────
+                    elif action_type == "read_clipboard":
+                        await self.send_status("📋 Reading system clipboard contents...")
+                        clip_text = ""
+                        try:
+                            if pyperclip:
+                                clip_text = pyperclip.paste() or ""
+                            else:
+                                import tkinter as tk
+                                r = tk.Tk()
+                                r.withdraw()
+                                clip_text = r.clipboard_get() or ""
+                                r.destroy()
+                        except Exception as e:
+                            clip_text = f"Error reading clipboard: {e}"
+
+                        truncated_clip = clip_text if len(clip_text) <= 4000 else clip_text[:4000] + "\n[...truncated at 4000 chars...]"
+                        await self.send_status(f"✅ Read {len(clip_text)} chars from clipboard.")
+                        rolling_history.append(types.Content(
+                            role="user",
+                            parts=[types.Part(text=f"[CLIPBOARD CONTENT]\n{truncated_clip}")],
+                        ))
+                        await asyncio.sleep(0.2)
+
+                    # ── set_clipboard ────────────────────────────────────────
+                    elif action_type == "set_clipboard":
+                        text_to_set = action_param.content or action_param.text or ""
+                        await self.send_status(f"📋 Copying to clipboard ({len(text_to_set)} chars)...")
+                        try:
+                            if pyperclip:
+                                pyperclip.copy(text_to_set)
+                            else:
+                                import subprocess
+                                proc = subprocess.Popen(['clip'], stdin=subprocess.PIPE, text=True)
+                                proc.communicate(input=text_to_set)
+                            await self.send_status("✅ Copied text to system clipboard.")
+                            res_msg = f"Successfully set clipboard ({len(text_to_set)} characters)."
+                        except Exception as e:
+                            await self.send_status(f"⚠️ Clipboard write failed: {e}")
+                            res_msg = f"Failed to set clipboard: {e}"
+
+                        rolling_history.append(types.Content(
+                            role="user",
+                            parts=[types.Part(text=f"[SET_CLIPBOARD RESULT]\n{res_msg}")],
+                        ))
+                        await asyncio.sleep(0.2)
 
                     # ── type ─────────────────────────────────────────────────
                     elif action_type == "type":
+
                         if not action_param.text:
                             continue
 
