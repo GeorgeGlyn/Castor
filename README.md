@@ -111,6 +111,26 @@ This starts the Vite web server on `http://localhost:5173` and boots Electron, w
 
 ---
 
+## 📦 Packaging Standalone Desktop Binaries
+
+To produce standalone desktop installers (`.exe` NSIS installer on Windows, `.dmg` on macOS, `.AppImage` on Linux):
+
+```bash
+cd frontend
+
+# Build production bundle and package for current OS
+npm run package
+
+# Or target specific operating systems:
+npm run dist:win    # Generates Windows installer & portable binary in dist-electron/
+npm run dist:mac    # Generates macOS DMG image
+npm run dist:linux  # Generates Linux AppImage & Debian package
+```
+All outputs are packaged into `frontend/dist-electron/`.
+
+
+---
+
 ## 🤝 Contributing
 
 We welcome community contributions! Please review [CONTRIBUTING.md](CONTRIBUTING.md) for local development workflows, code standards, and PR submission guidelines.
