@@ -287,6 +287,67 @@ app.whenReady().then(async () => {
     return null;
   });
 
+  ipcMain.handle('save-file', async (event, { defaultPath, content, filters }) => {
+    try {
+      const result = await dialog.showSaveDialog(mainWindow, {
+        defaultPath: defaultPath || 'Castor_Export.txt',
+        filters: filters || [{ name: 'All Files', extensions: ['*'] }]
+      });
+      if (!result.canceled && result.filePath) {
+        await fs.promises.writeFile(result.filePath, content, 'utf8');
+        return { success: true, filePath: result.filePath };
+      }
+      return { success: false, canceled: true };
+    } catch (err) {
+      console.error('Error in save-file IPC:', err);
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('export-pdf', async (event, { defaultPath, htmlContent }) => {
+    let printWindow = null;
+    try {
+      printWindow = new BrowserWindow({
+        show: false,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true
+        }
+      });
+
+      const tempPath = path.join(app.getPath('temp'), `castor_report_${Date.now()}.html`);
+      await fs.promises.writeFile(tempPath, htmlContent, 'utf8');
+      await printWindow.loadFile(tempPath);
+
+      const pdfData = await printWindow.webContents.printToPDF({
+        printBackground: true,
+        pageSize: 'A4',
+        margins: { top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 }
+      });
+
+      const result = await dialog.showSaveDialog(mainWindow, {
+        defaultPath: defaultPath || 'Castor_Run_Report.pdf',
+        filters: [{ name: 'PDF Document', extensions: ['pdf'] }]
+      });
+
+      if (!result.canceled && result.filePath) {
+        await fs.promises.writeFile(result.filePath, pdfData);
+        try { await fs.promises.unlink(tempPath); } catch (_) {}
+        return { success: true, filePath: result.filePath };
+      }
+
+      try { await fs.promises.unlink(tempPath); } catch (_) {}
+      return { success: false, canceled: true };
+    } catch (err) {
+      console.error('Error in export-pdf IPC:', err);
+      return { success: false, error: err.message };
+    } finally {
+      if (printWindow && !printWindow.isDestroyed()) {
+        printWindow.destroy();
+      }
+    }
+  });
+
   // Register Global Hotkey (Cmd/Ctrl + Shift + Esc)
   globalShortcut.register('CommandOrControl+Shift+Escape', () => {
     console.log('Kill switch activated!');

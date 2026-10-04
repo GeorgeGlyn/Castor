@@ -25,5 +25,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Multi-Monitor Display Management
   setActiveDisplay: (displayIndex) => ipcRenderer.send('set-active-display', { displayIndex }),
   getDisplays: () => ipcRenderer.invoke('get-displays'),
+
+  // Report Export & File Saving
+  saveFile: (options) => ipcRenderer.invoke('save-file', options),
+  exportPDF: (options) => ipcRenderer.invoke('export-pdf', options),
 });
 
