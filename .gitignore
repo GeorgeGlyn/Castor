@@ -15,3 +15,6 @@ backend/update_builder.py
 backend/write_skater_script.py
 .castor/logs/
 .castor/checkpoints/
+.castor/*.png
+.castor/*.json
+
