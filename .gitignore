@@ -14,3 +14,4 @@ backend/test_skater_rig.py
 backend/update_builder.py
 backend/write_skater_script.py
 .castor/logs/
+.castor/checkpoints/

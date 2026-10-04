@@ -17,6 +17,7 @@ try:
     from .subagent import run_subagent
     from .compactor import compact_history, append_transcript_step
     from .artifacts_manager import artifacts_manager
+    from .checkpoint_manager import checkpoint_manager
 except ImportError:
     import skills_manager
     import dev_tools
@@ -25,6 +26,7 @@ except ImportError:
     from subagent import run_subagent
     from compactor import compact_history, append_transcript_step
     from artifacts_manager import artifacts_manager
+    from checkpoint_manager import checkpoint_manager
 from fastapi import WebSocket
 from google import genai
 from google.genai import types
@@ -139,7 +141,7 @@ class ReplacementChunkItem(BaseModel):
 
 
 class ActionParams(BaseModel):
-    action: str        # "click" | "drag" | "type" | "hotkey" | "scroll" | "bash" | "done" | "skill" | "run_skill_script" | "view_file" | "write_to_file" | "replace_file_content" | "multi_replace_file_content" | "list_dir" | "grep_search" | "search_web" | "read_url_content" | "list_windows" | "focus_window" | "check_unity_diagnostics" | "schedule" | "ask_question" | "manage_task" | "save_knowledge" | "get_knowledge" | "invoke_subagent" | "create_artifact" | "update_artifact"
+    action: str        # "click" | "drag" | "type" | "hotkey" | "scroll" | "bash" | "done" | "skill" | "run_skill_script" | "view_file" | "write_to_file" | "replace_file_content" | "multi_replace_file_content" | "list_dir" | "grep_search" | "search_web" | "read_url_content" | "list_windows" | "focus_window" | "check_unity_diagnostics" | "schedule" | "create_checkpoint" | "restore_checkpoint" | "list_checkpoints" | "ask_question" | "manage_task" | "save_knowledge" | "get_knowledge" | "invoke_subagent" | "create_artifact" | "update_artifact"
     target: Optional[str] = None       # Semantic description for click/drag/scroll, or skill name for run_skill_script
     destination: Optional[str] = None  # Semantic description for drag end
     text: Optional[str] = None         # For type / bash / skill name / script name / URL / query, OR full detailed report/answer for 'done'
@@ -152,6 +154,9 @@ class ActionParams(BaseModel):
     end_line: Optional[int] = None     # Ending line number for view_file
     query: Optional[str] = None        # Search pattern/regex for grep_search or search_web
     duration_seconds: Optional[int] = None # For schedule (seconds to wait for builds / domain reloads)
+    # Universal Workspace Safety Checkpoints:
+    checkpoint_id: Optional[str] = None   # For restore_checkpoint (e.g. "cp_123" or "latest")
+    checkpoint_desc: Optional[str] = None # For create_checkpoint (e.g. "Before database migration")
     # Antigravity Developer Tool Extensions:
     questions: Optional[list[QuestionOptionItem]] = None   # For ask_question
     replacements: Optional[list[ReplacementChunkItem]] = None # For multi_replace_file_content
@@ -703,7 +708,10 @@ class AgentLoop:
             "   - 'invoke_subagent': delegate an isolated subtask (code drafting, multi-file research) to a subagent with its own fresh context. Set 'subagent_prompt'.\n"
             "   - 'ask_question': prompt the user with an interactive multiple-choice question modal when requirements are ambiguous. Set 'questions' list of {'question': '...', 'options': ['...'], 'is_multi_select': bool}.\n"
             "   - 'create_artifact': create an Antigravity-style persistent living document (walkthrough, plan, design spec, or architecture document) stored in .castor/artifacts. Set 'artifact_title', 'artifact_type' ('markdown' | 'code' | 'diagram' | 'diff'), and 'content'.\n"
-            "   - 'update_artifact': update an existing living document. Set 'artifact_id' and 'content'.\n\n"
+            "   - 'update_artifact': update an existing living document. Set 'artifact_id' and 'content'.\n"
+            "   - 'create_checkpoint': create a zero-risk workspace safety snapshot before major multi-file refactors or terminal scripts. Set 'checkpoint_desc' or 'text'.\n"
+            "   - 'restore_checkpoint': cleanly roll back workspace to a previous checkpoint if code generation fails or tests break. Set 'checkpoint_id' (or 'latest').\n"
+            "   - 'list_checkpoints': view all available safety checkpoints in this workspace.\n\n"
             "   [Skill System & Executables]\n"
             "   - 'skill': activate a domain skill into your persistent system instructions. Set 'text' to skill name (e.g. 'unity', 'windows-power').\n"
             "   - 'run_skill_script': execute a pre-tested helper script from a skill. Set 'target' to skill name and 'text' to script filename.\n\n"
@@ -1657,6 +1665,62 @@ class AgentLoop:
                         rolling_history.append(types.Content(
                             role="user",
                             parts=[types.Part(text=f"[SCHEDULE TIMER COMPLETED]\nWaited {duration}s for: {reason}")],
+                        ))
+                        await asyncio.sleep(0.2)
+
+                    # ── create_checkpoint ────────────────────────────────────
+                    elif action_type == "create_checkpoint":
+                        cp_desc = action_param.checkpoint_desc or action_param.text or action_param.target or "Safety checkpoint"
+                        await self.send_status(f"💾 Creating safety checkpoint: {cp_desc}...")
+                        ok, res_text = await asyncio.to_thread(
+                            checkpoint_manager.create_checkpoint,
+                            cp_desc,
+                            self.current_project_path,
+                        )
+                        if ok:
+                            await self.send_status(f"✅ {res_text}")
+                        else:
+                            await self.send_status(f"⚠️ Checkpoint notice: {res_text}")
+                        rolling_history.append(types.Content(
+                            role="user",
+                            parts=[types.Part(text=f"[CREATE_CHECKPOINT RESULT]\n{res_text}")],
+                        ))
+                        await asyncio.sleep(0.2)
+
+                    # ── restore_checkpoint ───────────────────────────────────
+                    elif action_type == "restore_checkpoint":
+                        cp_id = action_param.checkpoint_id or action_param.target or action_param.text or "latest"
+                        if hitl_enabled:
+                            approved = await self.request_hitl_approval(f"RESTORE_CHECKPOINT: {cp_id}")
+                            if not approved:
+                                break
+                        await self.send_status(f"⏪ Rolling back workspace to checkpoint: {cp_id}...")
+                        ok, res_text = await asyncio.to_thread(
+                            checkpoint_manager.restore_checkpoint,
+                            cp_id,
+                            self.current_project_path,
+                        )
+                        if ok:
+                            await self.send_status(f"✅ {res_text}")
+                        else:
+                            await self.send_status(f"⚠️ Rollback error: {res_text}")
+                        rolling_history.append(types.Content(
+                            role="user",
+                            parts=[types.Part(text=f"[RESTORE_CHECKPOINT RESULT]\n{res_text}")],
+                        ))
+                        await asyncio.sleep(0.3)
+
+                    # ── list_checkpoints ─────────────────────────────────────
+                    elif action_type == "list_checkpoints":
+                        await self.send_status("📋 Listing workspace safety checkpoints...")
+                        ok, res_text = await asyncio.to_thread(
+                            checkpoint_manager.list_checkpoints,
+                            self.current_project_path,
+                        )
+                        await self.send_status("✅ Retrieved checkpoints.")
+                        rolling_history.append(types.Content(
+                            role="user",
+                            parts=[types.Part(text=f"[LIST_CHECKPOINTS RESULT]\n{res_text}")],
                         ))
                         await asyncio.sleep(0.2)
 
