@@ -307,51 +307,77 @@ function Sidebar({
         )}
       </div>
 
-      {/* Collapsible Skills Drawer */}
+      {/* Interactive Skills & Plugins Marketplace Drawer */}
       <div className="border-t border-zinc-800/80 p-3">
-        <button
-          onClick={() => setIsSkillsOpen(!isSkillsOpen)}
-          className="w-full flex items-center justify-between text-[11px] font-semibold text-zinc-400 hover:text-zinc-200 transition-colors uppercase tracking-wider px-1 py-1"
-        >
+        <div className="flex items-center justify-between text-[11px] font-semibold text-zinc-400 uppercase tracking-wider px-1 py-1">
           <div className="flex items-center gap-1.5">
-            <span>Skills Catalog</span>
+            <span className="text-blue-400">🧩</span>
+            <span>Skills & Plugins</span>
             <span className="text-[10px] text-zinc-500 font-mono">({availableSkills.length})</span>
           </div>
-          <svg
-            className={`w-3.5 h-3.5 transition-transform ${isSkillsOpen ? 'rotate-180' : ''}`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
+          <button
+            onClick={() => setIsSkillsOpen(!isSkillsOpen)}
+            className="text-[10px] text-blue-400 hover:text-blue-300 font-mono underline uppercase"
           >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
+            {isSkillsOpen ? 'Close' : 'Browse'}
+          </button>
+        </div>
 
         {isSkillsOpen && (
-          <div className="mt-2 space-y-1 max-h-32 overflow-y-auto pr-1">
-            {availableSkills && availableSkills.length > 0 ? (
-              availableSkills.map((skill) => {
-                const isActive = activeSkills.includes(skill);
-                return (
-                  <div
-                    key={skill}
-                    className={`flex items-center gap-2 px-2 py-1 rounded text-xs transition-colors ${
-                      isActive
-                        ? 'bg-blue-900/30 text-blue-300 border border-blue-800/50'
-                        : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-300'
-                    }`}
-                  >
-                    <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-blue-400' : 'bg-zinc-600'}`} />
-                    <span className="truncate">{skill}</span>
-                  </div>
-                );
-              })
-            ) : (
-              <div className="text-xs text-zinc-600 px-1 italic">No skills loaded.</div>
-            )}
+          <div className="mt-2.5 space-y-2 bg-[#0c0c0e] border border-zinc-800/80 rounded-xl p-2.5 shadow-inner">
+            <div className="flex items-center justify-between border-b border-zinc-800/60 pb-1.5 px-0.5">
+              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Installed Packs</span>
+              <span className="text-[9px] font-mono text-emerald-400 bg-emerald-950/60 border border-emerald-800/40 px-1.5 py-0.2 rounded-full">
+                {activeSkills.length} Active
+              </span>
+            </div>
+
+            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+              {availableSkills && availableSkills.length > 0 ? (
+                availableSkills.map((skill) => {
+                  const isActive = activeSkills.includes(skill);
+                  return (
+                    <div
+                      key={skill}
+                      className={`flex flex-col p-2 rounded-lg border text-xs transition-all ${
+                        isActive
+                          ? 'bg-blue-950/30 text-blue-200 border-blue-700/50 shadow-sm'
+                          : 'bg-zinc-900/60 text-zinc-400 border-zinc-800/60 hover:border-zinc-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className={`w-2 h-2 rounded-full ${isActive ? 'bg-blue-400 animate-pulse' : 'bg-zinc-600'}`} />
+                          <span className="font-semibold truncate text-[11px] text-zinc-200">{skill}</span>
+                        </div>
+                        <span
+                          className={`text-[9px] font-mono px-1.5 py-0.5 rounded font-bold uppercase ${
+                            isActive ? 'bg-blue-600 text-white' : 'bg-zinc-800 text-zinc-500'
+                          }`}
+                        >
+                          {isActive ? 'Active' : 'Installed'}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-zinc-500 mt-1 line-clamp-1">
+                        {skill === 'unity'
+                          ? 'Unity 2D/3D development, physics, scripting & diagnostics'
+                          : skill === 'windows-power'
+                          ? 'Windows automation, process management, PowerShell & GUI'
+                          : skill === 'game-development-orchestrator'
+                          ? 'Universal game architecture, art pipeline & logic'
+                          : 'Domain procedural skills & helper scripts'}
+                      </span>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="text-xs text-zinc-500 px-1 italic py-2 text-center">No skills installed yet.</div>
+              )}
+            </div>
           </div>
         )}
       </div>
+
 
       {/* Footer / System Status */}
       <div className="p-3 border-t border-zinc-800 flex items-center gap-2.5 bg-zinc-950/40">
