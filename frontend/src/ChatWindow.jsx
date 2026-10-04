@@ -2,9 +2,50 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
 import Sidebar from './Sidebar';
 
-// ── Components ─────────────────────────────────────────────────────────────
+// ── Audio Cues (Zero External Dependencies, Pure Web Audio API) ─────────────
+const playSoundCue = (type = 'success') => {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    const now = ctx.currentTime;
+    if (type === 'success') {
+      // Pleasant two-tone ascending chime (C5 -> G5)
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523.25, now);
+      osc.frequency.exponentialRampToValueAtTime(783.99, now + 0.12);
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+      osc.start(now);
+      osc.stop(now + 0.36);
+    } else if (type === 'alert') {
+      // Gentle notification pulse (A4 -> E5)
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(440, now);
+      osc.frequency.exponentialRampToValueAtTime(659.25, now + 0.08);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+      osc.start(now);
+      osc.stop(now + 0.26);
+    } else if (type === 'start_mic') {
+      // Warm quick blip (G4)
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(392.0, now);
+      gain.gain.setValueAtTime(0.12, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+      osc.start(now);
+      osc.stop(now + 0.16);
+    }
+  } catch (_) {
+    // AudioContext blocked or not supported
+  }
+};
 
 const ThoughtAccordion = ({ text }) => {
+
   const [isOpen, setIsOpen] = useState(true);
   const displayText = (text || '').trim();
   if (!displayText) return null;
@@ -319,6 +360,59 @@ function ChatWindow() {
   const [activeSkills, setActiveSkills] = useState([]);
   const [isTasksExpanded, setIsTasksExpanded] = useState(true);
 
+  // ── Voice Input & Speech-to-Text (Web Speech API) ───────────────────────
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef(null);
+
+  const toggleVoiceInput = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert('Speech recognition is not supported in this environment.');
+      return;
+    }
+
+    if (isListening) {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      setIsListening(false);
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        playSoundCue('start_mic');
+      };
+
+      recognition.onresult = (event) => {
+        const transcript = Array.from(event.results)
+          .map((r) => r[0].transcript)
+          .join('');
+        setGoal(transcript);
+      };
+
+      recognition.onerror = () => {
+        setIsListening(false);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (e) {
+      console.error('Failed to start speech recognition', e);
+      setIsListening(false);
+    }
+  };
+
   // ── Always on Top Window Pin ──────────────────────────────────────────────
   const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(() => {
     try {
@@ -327,6 +421,7 @@ function ChatWindow() {
       return false;
     }
   });
+
 
   const toggleAlwaysOnTop = () => {
     setIsAlwaysOnTop((prev) => {
@@ -676,6 +771,7 @@ function ChatWindow() {
         setIsThinking(false);
         setAgentStatus('Approval required from user');
         currentThoughtRef.current = '';
+        playSoundCue('alert');
         setTimeout(() => {
           messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
         }, 50);
@@ -698,6 +794,7 @@ function ChatWindow() {
         setIsThinking(false);
         setAgentStatus('Awaiting your answer to question...');
         currentThoughtRef.current = '';
+        playSoundCue('alert');
         setTimeout(() => {
           messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
         }, 50);
@@ -732,6 +829,7 @@ function ChatWindow() {
         setHitlRequest(null);
         setQuestionModal(null);
         setAgentStatus('Goal complete!');
+        playSoundCue('success');
         if (window.electronAPI?.updateHUD) {
           window.electronAPI.updateHUD({ isRunning: false, status: '' });
         }
@@ -739,6 +837,7 @@ function ChatWindow() {
           window.electronAPI.focusMainWindow();
         }
       }
+
 
     };
 
@@ -1686,24 +1785,49 @@ function ChatWindow() {
                   )}
                 </div>
 
-                {/* Submit Button */}
-                <button
-                  onClick={startGoal}
-                  disabled={!isConnected || !goal.trim() || isAgentRunning}
-                  className="bg-zinc-200 hover:bg-white text-zinc-900 disabled:bg-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed p-1.5 rounded-lg transition-colors flex items-center justify-center shadow-sm"
-                >
-                  {isAgentRunning ? (
-                    <div className="w-5 h-5 flex items-center justify-center gap-0.5">
-                      <span className="w-1 h-1 bg-zinc-500 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
-                      <span className="w-1 h-1 bg-zinc-500 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
-                      <span className="w-1 h-1 bg-zinc-500 rounded-full animate-bounce"></span>
-                    </div>
-                  ) : (
-                    <svg className="w-5 h-5 translate-x-[1px] translate-y-[0.5px]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
-                    </svg>
-                  )}
-                </button>
+                {/* Voice Input & Submit Buttons */}
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={toggleVoiceInput}
+                    disabled={!isConnected || isAgentRunning}
+                    className={`p-1.5 rounded-lg transition-all flex items-center justify-center ${
+                      isListening
+                        ? 'bg-red-500/20 text-red-400 border border-red-500/50 shadow-lg shadow-red-500/20 animate-pulse'
+                        : 'text-zinc-400 hover:text-zinc-200 bg-zinc-800/80 hover:bg-zinc-750'
+                    }`}
+                    title={isListening ? 'Listening... (Click to stop)' : 'Voice input (Click to speak)'}
+                  >
+                    {isListening ? (
+                      <div className="w-5 h-5 flex items-center justify-center">
+                        <span className="w-2.5 h-2.5 rounded-sm bg-red-400 animate-ping" />
+                      </div>
+                    ) : (
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                      </svg>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={startGoal}
+                    disabled={!isConnected || !goal.trim() || isAgentRunning}
+                    className="bg-zinc-200 hover:bg-white text-zinc-900 disabled:bg-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed p-1.5 rounded-lg transition-colors flex items-center justify-center shadow-sm"
+                  >
+                    {isAgentRunning ? (
+                      <div className="w-5 h-5 flex items-center justify-center gap-0.5">
+                        <span className="w-1 h-1 bg-zinc-500 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                        <span className="w-1 h-1 bg-zinc-500 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                        <span className="w-1 h-1 bg-zinc-500 rounded-full animate-bounce"></span>
+                      </div>
+                    ) : (
+                      <svg className="w-5 h-5 translate-x-[1px] translate-y-[0.5px]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+
               </div>
             </div>
 
