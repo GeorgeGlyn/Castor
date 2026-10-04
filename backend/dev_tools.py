@@ -797,6 +797,86 @@ def generate_image_asset(
         return False, f"Failed to generate image asset: {e}"
 
 
+def run_tests(
+    test_command: Optional[str] = None,
+    cwd: Optional[str] = None,
+) -> Tuple[bool, str]:
+    """
+    Run automated tests or build verification for ANY project type
+    (Python, JavaScript/TypeScript, Go, Rust, C#/.NET) with automatic framework detection.
+    """
+    import os
+    import json
+    import glob
+    import subprocess
+
+    target_dir = resolve_path(".", cwd)
+    cmd = test_command
+
+    # Auto-detect test runner if none specified
+    if not cmd:
+        pkg_json = os.path.join(target_dir, "package.json")
+        if os.path.exists(pkg_json):
+            try:
+                with open(pkg_json, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if "scripts" in data and "test" in data["scripts"]:
+                        cmd = "npm test"
+            except Exception:
+                pass
+
+        if not cmd and os.path.exists(os.path.join(target_dir, "Cargo.toml")):
+            cmd = "cargo test"
+
+        if not cmd and os.path.exists(os.path.join(target_dir, "go.mod")):
+            cmd = "go test ./..."
+
+        if not cmd and (
+            glob.glob(os.path.join(target_dir, "*.csproj"))
+            or glob.glob(os.path.join(target_dir, "*.sln"))
+        ):
+            cmd = "dotnet test"
+
+        if not cmd and (
+            os.path.exists(os.path.join(target_dir, "pytest.ini"))
+            or os.path.exists(os.path.join(target_dir, "pyproject.toml"))
+            or os.path.exists(os.path.join(target_dir, "tests"))
+            or os.path.exists(os.path.join(target_dir, "test"))
+        ):
+            cmd = "python -m unittest discover tests"
+
+    if not cmd:
+        return False, (
+            f"Could not auto-detect a test framework in '{target_dir}'. "
+            "Please specify 'test_command' (e.g. 'npm test', 'pytest', 'cargo test', 'go test')."
+        )
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=target_dir,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        combined_out = (proc.stdout + "\n" + proc.stderr).strip()
+
+        # Format output slice (cap at 4000 chars)
+        if len(combined_out) > 4000:
+            combined_out = combined_out[:4000] + "\n\n[...Test output truncated at 4000 chars...]"
+
+        if proc.returncode == 0:
+            return True, f"✅ Tests Passed using '{cmd}':\n" + ("=" * 60) + f"\n\n{combined_out}"
+        else:
+            return False, f"❌ Tests Failed (Exit Code {proc.returncode}) using '{cmd}':\n" + ("=" * 60) + f"\n\n{combined_out}"
+    except subprocess.TimeoutExpired:
+        return False, f"⚠️ Test command '{cmd}' timed out after 120 seconds."
+    except Exception as e:
+        return False, f"Error running tests '{cmd}': {e}"
+
+
+
 
 
 

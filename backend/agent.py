@@ -143,7 +143,7 @@ class ReplacementChunkItem(BaseModel):
 
 
 class ActionParams(BaseModel):
-    action: str        # "click" | "drag" | "type" | "hotkey" | "scroll" | "bash" | "done" | "skill" | "run_skill_script" | "view_file" | "write_to_file" | "replace_file_content" | "multi_replace_file_content" | "list_dir" | "grep_search" | "search_web" | "read_url_content" | "list_windows" | "focus_window" | "check_unity_diagnostics" | "schedule" | "create_checkpoint" | "restore_checkpoint" | "list_checkpoints" | "generate_image_asset" | "ask_question" | "manage_task" | "save_knowledge" | "get_knowledge" | "invoke_subagent" | "create_artifact" | "update_artifact"
+    action: str        # "click" | "drag" | "type" | "hotkey" | "scroll" | "bash" | "done" | "skill" | "run_skill_script" | "view_file" | "write_to_file" | "replace_file_content" | "multi_replace_file_content" | "list_dir" | "grep_search" | "search_web" | "read_url_content" | "list_windows" | "focus_window" | "check_unity_diagnostics" | "schedule" | "create_checkpoint" | "restore_checkpoint" | "list_checkpoints" | "generate_image_asset" | "run_tests" | "ask_question" | "manage_task" | "save_knowledge" | "get_knowledge" | "invoke_subagent" | "create_artifact" | "update_artifact"
     target: Optional[str] = None       # Semantic description for click/drag/scroll, or skill name for run_skill_script
     destination: Optional[str] = None  # Semantic description for drag end
     text: Optional[str] = None         # For type / bash / skill name / script name / URL / query, OR full detailed report/answer for 'done'
@@ -156,6 +156,7 @@ class ActionParams(BaseModel):
     end_line: Optional[int] = None     # Ending line number for view_file
     query: Optional[str] = None        # Search pattern/regex for grep_search or search_web
     duration_seconds: Optional[int] = None # For schedule (seconds to wait for builds / domain reloads)
+    test_command: Optional[str] = None    # For run_tests (e.g. "npm test", "pytest", "cargo test")
     # Universal Workspace Safety Checkpoints:
     checkpoint_id: Optional[str] = None   # For restore_checkpoint (e.g. "cp_123" or "latest")
     checkpoint_desc: Optional[str] = None # For create_checkpoint (e.g. "Before database migration")
@@ -689,7 +690,8 @@ class AgentLoop:
             "   - 'create_checkpoint': create a zero-risk workspace safety snapshot before major multi-file refactors or terminal scripts. Set 'checkpoint_desc' or 'text'.\n"
             "   - 'restore_checkpoint': cleanly roll back workspace to a previous checkpoint if code generation fails or tests break. Set 'checkpoint_id' (or 'latest').\n"
             "   - 'list_checkpoints': view all available safety checkpoints in this workspace.\n"
-            "   - 'generate_image_asset': create clean visual assets (PNG or SVG) for any project—app icons, favicons, logos, badges, UI buttons, pixel sprites (mario, enemy, coin, block), and textures. Set 'path', 'asset_type' ('icon' | 'pixel_sprite' | 'texture' | 'badge' | 'gradient' | 'svg'), 'width', 'height', and optional 'preset'/'label'.\n\n"
+            "   - 'generate_image_asset': create clean visual assets (PNG or SVG) for any project—app icons, favicons, logos, badges, UI buttons, pixel sprites (mario, enemy, coin, block), and textures. Set 'path', 'asset_type' ('icon' | 'pixel_sprite' | 'texture' | 'badge' | 'gradient' | 'svg'), 'width', 'height', and optional 'preset'/'label'.\n"
+            "   - 'run_tests': execute automated tests or build verification for ANY project type (Python, JavaScript/TypeScript, Go, Rust, C#/.NET) with automatic framework detection or custom 'test_command'. Use to verify that code changes work with zero regressions!\n\n"
             "   [Skill System & Executables]\n"
             "   - 'skill': activate a domain skill into your persistent system instructions. Set 'text' to skill name (e.g. 'unity', 'windows-power').\n"
             "   - 'run_skill_script': execute a pre-tested helper script from a skill. Set 'target' to skill name and 'text' to script filename.\n\n"
@@ -1741,6 +1743,25 @@ class AgentLoop:
                             parts=[types.Part(text=f"[GENERATE_IMAGE_ASSET RESULT]\n{res_text}")],
                         ))
                         await asyncio.sleep(0.2)
+
+                    # ── run_tests ────────────────────────────────────────────
+                    elif action_type == "run_tests":
+                        t_cmd = action_param.test_command or action_param.text
+                        await self.send_status(f"🧪 Running tests ({t_cmd or 'auto-detected runner'})...")
+                        ok, res_text = await asyncio.to_thread(
+                            dev_tools.run_tests,
+                            t_cmd,
+                            self.current_project_path,
+                        )
+                        if ok:
+                            await self.send_status("✅ All tests passed!")
+                        else:
+                            await self.send_status("❌ Test failures detected.")
+                        rolling_history.append(types.Content(
+                            role="user",
+                            parts=[types.Part(text=f"[RUN_TESTS RESULT]\n{res_text}")],
+                        ))
+                        await asyncio.sleep(0.3)
 
                     # ── type ─────────────────────────────────────────────────
                     elif action_type == "type":
