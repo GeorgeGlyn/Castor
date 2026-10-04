@@ -11,7 +11,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onDrawBbox: (callback) => ipcRenderer.on('draw-bbox', (event, data) => callback(data)),
   removeAllDrawBboxListeners: () => ipcRenderer.removeAllListeners('draw-bbox'),
 
-  // Window control
+  // Window control & floating HUD
   minimizeMainWindow: () => ipcRenderer.send('minimize-main-window'),
+  setAlwaysOnTop: (flag) => ipcRenderer.send('set-always-on-top', flag),
+  focusMainWindow: () => ipcRenderer.send('focus-main-window'),
+  updateHUD: (data) => ipcRenderer.send('update-hud', data),
   selectFolder: () => ipcRenderer.invoke('select-folder'),
+
+  // Overlay UI events
+  onDrawHud: (callback) => ipcRenderer.on('draw-hud', (event, data) => callback(data)),
+  removeAllDrawHudListeners: () => ipcRenderer.removeAllListeners('draw-hud'),
 });
+

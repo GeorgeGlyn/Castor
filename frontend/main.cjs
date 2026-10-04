@@ -207,6 +207,30 @@ app.whenReady().then(async () => {
     }
   });
 
+  ipcMain.on('set-always-on-top', (event, flag) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setAlwaysOnTop(Boolean(flag), 'floating');
+    }
+  });
+
+  ipcMain.on('focus-main-window', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+
+  // Relay live agent status to the transparent floating HUD
+  ipcMain.on('update-hud', (event, data) => {
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send('draw-hud', data);
+      if (data && data.isRunning) {
+        overlayWindow.showInactive();
+      }
+    }
+  });
+
+
   ipcMain.handle('select-folder', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
       properties: ['openDirectory', 'createDirectory'],
