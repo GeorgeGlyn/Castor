@@ -18,6 +18,7 @@ try:
     from .compactor import compact_history, append_transcript_step
     from .artifacts_manager import artifacts_manager
     from .checkpoint_manager import checkpoint_manager
+    from .gemini_pool import gemini_pool
 except ImportError:
     import skills_manager
     import dev_tools
@@ -27,6 +28,7 @@ except ImportError:
     from compactor import compact_history, append_transcript_step
     from artifacts_manager import artifacts_manager
     from checkpoint_manager import checkpoint_manager
+    from gemini_pool import gemini_pool
 from fastapi import WebSocket
 from google import genai
 from google.genai import types
@@ -310,49 +312,16 @@ class AgentLoop:
         max_retries_per_model: int = 2,
     ):
         """
-        Generates content using primary_model, automatically retrying on transient
-        errors (such as 503 UNAVAILABLE or 429) and falling back to alternative
-        models if primary is experiencing high demand.
+        Generates content using resilient multi-key and multi-model failover pool.
+        Automatically retries on transient errors and rotates keys on 429 quota exhaustion.
         """
-        if fallback_models is None:
-            fallback_models = [
-                "gemini-3.5-flash-lite",
-                "gemini-3.1-flash-lite",
-                "gemini-flash-lite-latest",
-                "gemini-3-flash-preview",
-                "gemini-3.1-flash-lite-preview",
-            ]
-        
-        models_to_try = [primary_model] + [m for m in fallback_models if m != primary_model]
-        last_err = None
-
-        for model in models_to_try:
-            for attempt in range(max_retries_per_model):
-                try:
-                    res = self.client.models.generate_content(
-                        model=model,
-                        contents=contents,
-                        config=config,
-                    )
-                    if model != primary_model:
-                        print(f"[Castor] Fallback model '{model}' succeeded (primary '{primary_model}' was unavailable).")
-                    return res
-                except Exception as e:
-                    last_err = e
-                    err_str = str(e)
-                    is_transient = (
-                        "503" in err_str
-                        or "UNAVAILABLE" in err_str
-                        or "429" in err_str
-                        or "RESOURCE_EXHAUSTED" in err_str
-                    )
-                    print(f"[Castor] Model '{model}' attempt {attempt + 1} failed: {e}")
-                    if is_transient and attempt < max_retries_per_model - 1:
-                        time.sleep(1.0)
-                        continue
-                    break
-
-        raise last_err
+        return gemini_pool.generate_content(
+            primary_model=primary_model,
+            contents=contents,
+            config=config,
+            fallback_models=fallback_models,
+            max_retries_per_model=max_retries_per_model,
+        )
 
     async def decompose_goal_into_tasks(self, goal: str) -> list[TaskItem]:
         """Fast upfront decomposition of the goal into 3-6 milestone tasks (Antigravity-style)."""

@@ -23,6 +23,7 @@ try:
         search_web,
         read_url_content,
     )
+    from .gemini_pool import gemini_pool
 except ImportError:
     from dev_tools import (
         view_file,
@@ -33,6 +34,7 @@ except ImportError:
         search_web,
         read_url_content,
     )
+    from gemini_pool import gemini_pool
 
 
 class SubagentAction(BaseModel):
@@ -108,29 +110,20 @@ async def run_subagent(
                 "gemini-flash-lite-latest",
                 "gemini-3-flash-preview",
             ]
-            resp = None
-            last_err = None
-
-            for m in candidate_models:
-                try:
-                    resp = client.models.generate_content(
-                        model=m,
-                        contents=conversation_history,
-                        config=types.GenerateContentConfig(
-                            system_instruction=SUBAGENT_SYSTEM_PROMPT,
-                            response_mime_type="application/json",
-                            response_schema=SubagentStepResponse,
-                            temperature=0.2,
-                        ),
-                    )
-                    if resp and resp.text:
-                        break
-                except Exception as e:
-                    last_err = e
-                    continue
+            resp = gemini_pool.generate_content(
+                primary_model=selected_model,
+                contents=conversation_history,
+                config=types.GenerateContentConfig(
+                    system_instruction=SUBAGENT_SYSTEM_PROMPT,
+                    response_mime_type="application/json",
+                    response_schema=SubagentStepResponse,
+                    temperature=0.2,
+                ),
+                fallback_models=candidate_models,
+            )
 
             if not resp or not resp.text:
-                return False, f"Subagent failed to generate response: {last_err}"
+                return False, "Subagent failed to generate response."
 
             step_data = SubagentStepResponse.model_validate_json(resp.text)
             action = step_data.action
