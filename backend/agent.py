@@ -19,6 +19,7 @@ try:
     from .artifacts_manager import artifacts_manager
     from .checkpoint_manager import checkpoint_manager
     from .gemini_pool import gemini_pool
+    from .ocr_engine import ocr_engine
 except ImportError:
     import skills_manager
     import dev_tools
@@ -29,6 +30,7 @@ except ImportError:
     from artifacts_manager import artifacts_manager
     from checkpoint_manager import checkpoint_manager
     from gemini_pool import gemini_pool
+    from ocr_engine import ocr_engine
 from fastapi import WebSocket
 from google import genai
 from google.genai import types
@@ -161,7 +163,8 @@ class ReplacementChunkItem(BaseModel):
 
 
 class ActionParams(BaseModel):
-    action: str        # "click" | "drag" | "type" | "hotkey" | "scroll" | "bash" | "done" | "skill" | "run_skill_script" | "view_file" | "write_to_file" | "replace_file_content" | "multi_replace_file_content" | "list_dir" | "grep_search" | "search_web" | "read_url_content" | "list_windows" | "focus_window" | "check_unity_diagnostics" | "schedule" | "create_checkpoint" | "restore_checkpoint" | "list_checkpoints" | "generate_image_asset" | "run_tests" | "read_clipboard" | "set_clipboard" | "ask_question" | "manage_task" | "save_knowledge" | "get_knowledge" | "invoke_subagent" | "create_artifact" | "update_artifact"
+    action: str        # "click" | "drag" | "type" | "hotkey" | "scroll" | "bash" | "done" | "skill" | "run_skill_script" | "view_file" | "write_to_file" | "replace_file_content" | "multi_replace_file_content" | "list_dir" | "grep_search" | "search_web" | "read_url_content" | "list_windows" | "focus_window" | "check_unity_diagnostics" | "schedule" | "create_checkpoint" | "restore_checkpoint" | "list_checkpoints" | "generate_image_asset" | "run_tests" | "read_clipboard" | "set_clipboard" | "read_screen_text" | "ask_question" | "manage_task" | "save_knowledge" | "get_knowledge" | "invoke_subagent" | "create_artifact" | "update_artifact"
+
 
     target: Optional[str] = None       # Semantic description for click/drag/scroll, or skill name for run_skill_script
     destination: Optional[str] = None  # Semantic description for drag end
@@ -717,7 +720,8 @@ class AgentLoop:
             "5. AVAILABLE ACTIONS:\n"
             "   [GUI Desktop Actions]\n"
             "   - 'click': set 'target' to a clear semantic description of the element to click "
-            "     (e.g., 'the New project button in Unity Hub', 'the Projects tab', 'the Windows Start icon').\n"
+            "     (e.g., 'the New project button in Unity Hub', 'the Projects tab', 'File', 'Terminal'). "
+            "     NOTE: Clicks on text buttons, tabs, menu items, and dialog labels automatically resolve via sub-100ms Fast Local Text-Anchoring (zero quota consumption), falling back to Gemini Vision Grounder if not found!\n"
             "   - 'drag': set 'target' (start) and 'destination' (end).\n"
             "   - 'type': put text to type in 'text'.\n"
             "   - 'hotkey': list of keys (e.g., ['win'], ['enter'], ['ctrl', 's'], ['alt', 'f4']).\n"
@@ -749,7 +753,8 @@ class AgentLoop:
             "   - 'generate_image_asset': create clean visual assets for any project (PNG or SVG). Supports dual-mode generation: 'image_mode' ('ai' for Google Nano Banana / Gemini image generation with prompt, 'python' for zero-quota local Pillow/SVG generation, or 'ask' to display an interactive modal asking the user's preference). Set 'path', 'prompt' (for AI), 'asset_type' ('icon' | 'pixel_sprite' | 'texture' | 'badge' | 'gradient' | 'svg'), 'width', 'height', and optional 'preset'/'label'. If AI quota is exhausted, it automatically falls back to local Python generation!\n"
             "   - 'run_tests': execute automated tests or build verification for ANY project type (Python, JavaScript/TypeScript, Go, Rust, C#/.NET) with automatic framework detection or custom 'test_command'. When tests fail, you can inspect tracebacks, surgical-edit files with 'replace_file_content', or set 'auto_fix'=True for automated checkpoint-and-repair iterations!\n"
             "   - 'read_clipboard': instantly read text currently on the operating system clipboard (e.g. copied errors, links, code snippets, tokens) without needing screen OCR.\n"
-            "   - 'set_clipboard': write text or code directly into the operating system clipboard. Set 'text' or 'content'.\n\n"
+            "   - 'set_clipboard': write text or code directly into the operating system clipboard. Set 'text' or 'content'.\n"
+            "   - 'read_screen_text': perform fast local OCR (sub-100ms) to read all visible text lines, buttons, labels, and exact coordinates from the current screen without calling an LLM or consuming quota. Returns a structured list of text lines and bounding boxes. Use whenever you need to read logs, error messages, dialog texts, or locate text items!\n\n"
             "   [Skill System & Executables]\n"
             "   - 'skill': activate a domain skill into your persistent system instructions. Set 'text' to skill name (e.g. 'unity', 'windows-power').\n"
             "   - 'run_skill_script': execute a pre-tested helper script from a skill. Set 'target' to skill name and 'text' to script filename.\n\n"
@@ -1954,6 +1959,26 @@ class AgentLoop:
                         ))
                         await asyncio.sleep(0.2)
 
+                    # ── read_screen_text (Fast Local OCR Text Recognition) ───
+                    elif action_type == "read_screen_text":
+                        await self.send_status("📖 Reading visible on-screen text via Fast Local OCR...")
+                        entries = await ocr_engine.recognize(full_img)
+                        if entries:
+                            lines_summary = []
+                            for e in entries[:60]:
+                                lines_summary.append(f"• \"{e['text']}\" at center ({e['cx']}, {e['cy']}) [bbox: {e['x']},{e['y']},{e['w']},{e['h']}]")
+                            summary_text = f"Found {len(entries)} visible text lines on screen:\n" + "\n".join(lines_summary)
+                            await self.send_status(f"✅ Extracted {len(entries)} text lines ({len(lines_summary)} summarized).")
+                        else:
+                            summary_text = "No text lines detected on screen or OCR unavailable."
+                            await self.send_status("⚠️ No text lines detected on screen.")
+
+                        rolling_history.append(types.Content(
+                            role="user",
+                            parts=[types.Part(text=f"[READ_SCREEN_TEXT RESULT]\n{summary_text}")],
+                        ))
+                        await asyncio.sleep(0.2)
+
                     # ── type ─────────────────────────────────────────────────
                     elif action_type == "type":
 
@@ -2009,11 +2034,15 @@ class AgentLoop:
                         # Ground the scroll target to get coordinates
                         scroll_x, scroll_y = 0, 0
                         if target_desc:
-                            g_data = await asyncio.to_thread(
-                                self.call_grounder_sync, target_desc, full_img, monitor
-                            )
-                            if g_data and g_data.get("px", -1) >= 0 and g_data.get("py", -1) >= 0:
-                                scroll_x, scroll_y = g_data["px"], g_data["py"]
+                            s_anchor = await ocr_engine.find_anchor(target_desc, full_img, monitor)
+                            if s_anchor and s_anchor.get("px", -1) >= 0 and s_anchor.get("py", -1) >= 0:
+                                scroll_x, scroll_y = s_anchor["px"], s_anchor["py"]
+                            else:
+                                g_data = await asyncio.to_thread(
+                                    self.call_grounder_sync, target_desc, full_img, monitor
+                                )
+                                if g_data and g_data.get("px", -1) >= 0 and g_data.get("py", -1) >= 0:
+                                    scroll_x, scroll_y = g_data["px"], g_data["py"]
 
                         if hitl_enabled:
                             label = f"SCROLL {clicks} clicks" + (f" on '{target_desc}'" if target_desc else " at current position")
@@ -2047,10 +2076,17 @@ class AgentLoop:
                             await self.send_status("⚠️ Click/drag action missing target. Skipping.")
                             continue
 
-                        await self.send_status(f"🎯 Grounding target with precision: '{action_param.target}'")
-                        g_data = await asyncio.to_thread(
-                            self.call_grounder_sync, action_param.target, full_img, monitor
-                        )
+                        g_data = None
+                        # Attempt Fast Local Text-Anchor first (sub-100ms, zero quota)
+                        fast_anchor = await ocr_engine.find_anchor(action_param.target, full_img, monitor)
+                        if fast_anchor:
+                            g_data = fast_anchor
+                            await self.send_status(f"⚡ Fast Text-Anchor matched '{fast_anchor['matched_text']}' in 0.05s at ({fast_anchor['px']}, {fast_anchor['py']})")
+                        else:
+                            await self.send_status(f"🎯 Grounding target with precision: '{action_param.target}'")
+                            g_data = await asyncio.to_thread(
+                                self.call_grounder_sync, action_param.target, full_img, monitor
+                            )
 
                         if g_data is None:
                             await self.send_status("❌ Grounder failed to locate target. Skipping action.")
@@ -2078,12 +2114,16 @@ class AgentLoop:
                         # Resolve drag destination
                         dest_px, dest_py = None, None
                         if action_type == "drag" and action_param.destination:
-                            await self.send_status(f"🎯 Grounding drag destination: '{action_param.destination}'")
-                            d_data = await asyncio.to_thread(
-                                self.call_grounder_sync, action_param.destination, full_img, monitor
-                            )
-                            if d_data and d_data.get("px", -1) >= 0 and d_data.get("py", -1) >= 0:
-                                dest_px, dest_py = d_data["px"], d_data["py"]
+                            dest_anchor = await ocr_engine.find_anchor(action_param.destination, full_img, monitor)
+                            if dest_anchor and dest_anchor.get("px", -1) >= 0 and dest_anchor.get("py", -1) >= 0:
+                                dest_px, dest_py = dest_anchor["px"], dest_anchor["py"]
+                            else:
+                                await self.send_status(f"🎯 Grounding drag destination: '{action_param.destination}'")
+                                d_data = await asyncio.to_thread(
+                                    self.call_grounder_sync, action_param.destination, full_img, monitor
+                                )
+                                if d_data and d_data.get("px", -1) >= 0 and d_data.get("py", -1) >= 0:
+                                    dest_px, dest_py = d_data["px"], d_data["py"]
 
                         if hitl_enabled:
                             label = f"{action_type.upper()}: {action_param.target}"
