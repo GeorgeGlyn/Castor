@@ -78,7 +78,7 @@ async def run_subagent(
     context: Optional[str] = None,
     cwd: Optional[str] = None,
     api_key: Optional[str] = None,
-    model_name: str = "gemini-3.7-flash",
+    model_name: Optional[str] = None,
     max_turns: int = 8,
 ) -> Tuple[bool, str]:
     """Execute a subagent loop in an isolated context window."""
@@ -86,6 +86,7 @@ async def run_subagent(
     if not key:
         return False, "ERROR: Subagent cannot start without GEMINI_API_KEY."
 
+    selected_model = model_name or os.getenv("PLANNER_MODEL", "gemini-3.5-flash-lite")
     client = genai.Client(api_key=key)
     conversation_history = []
 
@@ -99,8 +100,14 @@ async def run_subagent(
 
     for turn in range(1, max_turns + 1):
         try:
-            # Fallback model list
-            candidate_models = [model_name, "gemini-flash-latest", "gemini-flash-lite-latest"]
+            # Fallback model list with active quota models
+            candidate_models = [
+                selected_model,
+                "gemini-3.5-flash-lite",
+                "gemini-3.1-flash-lite",
+                "gemini-flash-lite-latest",
+                "gemini-3-flash-preview",
+            ]
             resp = None
             last_err = None
 
