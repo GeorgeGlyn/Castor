@@ -163,7 +163,8 @@ class ReplacementChunkItem(BaseModel):
 
 
 class ActionParams(BaseModel):
-    action: str        # "click" | "drag" | "type" | "hotkey" | "scroll" | "bash" | "done" | "skill" | "run_skill_script" | "view_file" | "write_to_file" | "replace_file_content" | "multi_replace_file_content" | "list_dir" | "grep_search" | "search_web" | "read_url_content" | "list_windows" | "focus_window" | "check_unity_diagnostics" | "schedule" | "create_checkpoint" | "restore_checkpoint" | "list_checkpoints" | "generate_image_asset" | "run_tests" | "read_clipboard" | "set_clipboard" | "read_screen_text" | "ask_question" | "manage_task" | "save_knowledge" | "get_knowledge" | "invoke_subagent" | "create_artifact" | "update_artifact"
+    action: str        # "click" | "drag" | "type" | "hotkey" | "scroll" | "bash" | "done" | "skill" | "run_skill_script" | "view_file" | "write_to_file" | "replace_file_content" | "multi_replace_file_content" | "list_dir" | "grep_search" | "search_web" | "read_url_content" | "list_windows" | "focus_window" | "check_unity_diagnostics" | "schedule" | "create_checkpoint" | "restore_checkpoint" | "list_checkpoints" | "generate_image_asset" | "run_tests" | "read_clipboard" | "set_clipboard" | "read_screen_text" | "switch_monitor" | "ask_question" | "manage_task" | "save_knowledge" | "get_knowledge" | "invoke_subagent" | "create_artifact" | "update_artifact"
+
 
 
     target: Optional[str] = None       # Semantic description for click/drag/scroll, or skill name for run_skill_script
@@ -209,6 +210,8 @@ class ActionParams(BaseModel):
     primary_color: Optional[str] = None                   # Hex color (e.g. "#4285F4")
     secondary_color: Optional[str] = None                 # Hex color (e.g. "#34A853")
     preset: Optional[str] = None                          # Preset name (e.g. "mario", "goomba", "coin", "brick")
+    # Multi-Monitor Display Target:
+    monitor_index: Optional[int] = None                   # Display index (1 for Primary, 2 for Secondary, etc.)
 
 
 
@@ -238,6 +241,36 @@ class GrounderResponse(BaseModel):
     is_micro_target: bool = False
 
 
+def get_monitors_info() -> list[dict]:
+    """Enumerates all connected physical displays and their bounds."""
+    ensure_input_desktop()
+    with mss.mss() as sct:
+        monitors = []
+        for idx in range(1, len(sct.monitors)):
+            m = sct.monitors[idx]
+            monitors.append({
+                "index": idx,
+                "name": f"Display {idx}" + (" (Primary)" if idx == 1 else ""),
+                "left": m["left"],
+                "top": m["top"],
+                "width": m["width"],
+                "height": m["height"],
+                "is_primary": idx == 1,
+            })
+        if not monitors and len(sct.monitors) > 0:
+            m = sct.monitors[0]
+            monitors.append({
+                "index": 1,
+                "name": "Display 1 (Primary)",
+                "left": m["left"],
+                "top": m["top"],
+                "width": m["width"],
+                "height": m["height"],
+                "is_primary": True,
+            })
+        return monitors
+
+
 # ── Agent Loop ────────────────────────────────────────────────────────────────
 
 class AgentLoop:
@@ -250,6 +283,7 @@ class AgentLoop:
         self.loaded_skills = set()
         self.active_skills_content: dict[str, str] = {}
         self.current_project_path: str | None = None
+        self.monitor_index: int = 1
 
         self.api_key = os.getenv("GEMINI_API_KEY")
         # Model names are read fresh inside run() so .env changes take effect after reload
@@ -258,6 +292,28 @@ class AgentLoop:
         self.diff_threshold = float(os.getenv("SCREEN_DIFF_THRESHOLD", "1.0"))
         self.question_event = asyncio.Event()
         self.user_answers: list = []
+
+    def set_monitor_index(self, index: int) -> bool:
+        """Sets active monitor index for screen captures and interactions."""
+        ensure_input_desktop()
+        with mss.mss() as sct:
+            if 1 <= index < len(sct.monitors):
+                self.monitor_index = index
+                return True
+            elif index == 1 and len(sct.monitors) > 0:
+                self.monitor_index = 1
+                return True
+        return False
+
+    def get_active_monitor_info(self) -> dict:
+        """Returns details of the currently targeted monitor."""
+        ensure_input_desktop()
+        with mss.mss() as sct:
+            if 1 <= self.monitor_index < len(sct.monitors):
+                return sct.monitors[self.monitor_index]
+            elif len(sct.monitors) > 1:
+                return sct.monitors[1]
+            return sct.monitors[0]
 
     def stop(self):
         self.is_running = False
@@ -278,7 +334,13 @@ class AgentLoop:
     def capture_screen_sync(self):
         ensure_input_desktop()
         with mss.mss() as sct:
-            monitor = sct.monitors[1]  # Primary monitor
+            if 1 <= self.monitor_index < len(sct.monitors):
+                monitor = sct.monitors[self.monitor_index]
+            elif len(sct.monitors) > 1:
+                monitor = sct.monitors[1]
+            else:
+                monitor = sct.monitors[0]
+
             sct_img = sct.grab(monitor)
             img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
             # If screen capture returned pitch-black (due to thread desktop detachment or display state), re-attach and retry
@@ -290,6 +352,7 @@ class AgentLoop:
                 if img2.getextrema() != ((0, 0), (0, 0), (0, 0)):
                     img = img2
             return img, monitor
+
 
 
     async def capture_screen(self):
@@ -753,8 +816,8 @@ class AgentLoop:
             "   - 'generate_image_asset': create clean visual assets for any project (PNG or SVG). Supports dual-mode generation: 'image_mode' ('ai' for Google Nano Banana / Gemini image generation with prompt, 'python' for zero-quota local Pillow/SVG generation, or 'ask' to display an interactive modal asking the user's preference). Set 'path', 'prompt' (for AI), 'asset_type' ('icon' | 'pixel_sprite' | 'texture' | 'badge' | 'gradient' | 'svg'), 'width', 'height', and optional 'preset'/'label'. If AI quota is exhausted, it automatically falls back to local Python generation!\n"
             "   - 'run_tests': execute automated tests or build verification for ANY project type (Python, JavaScript/TypeScript, Go, Rust, C#/.NET) with automatic framework detection or custom 'test_command'. When tests fail, you can inspect tracebacks, surgical-edit files with 'replace_file_content', or set 'auto_fix'=True for automated checkpoint-and-repair iterations!\n"
             "   - 'read_clipboard': instantly read text currently on the operating system clipboard (e.g. copied errors, links, code snippets, tokens) without needing screen OCR.\n"
-            "   - 'set_clipboard': write text or code directly into the operating system clipboard. Set 'text' or 'content'.\n"
-            "   - 'read_screen_text': perform fast local OCR (sub-100ms) to read all visible text lines, buttons, labels, and exact coordinates from the current screen without calling an LLM or consuming quota. Returns a structured list of text lines and bounding boxes. Use whenever you need to read logs, error messages, dialog texts, or locate text items!\n\n"
+            "   - 'read_screen_text': perform fast local OCR (sub-100ms) to read all visible text lines, buttons, labels, and exact coordinates from the current screen without calling an LLM or consuming quota. Returns a structured list of text lines and bounding boxes. Use whenever you need to read logs, error messages, dialog texts, or locate text items!\n"
+            "   - 'switch_monitor': switch Castor's active screen capture and visual automation focus to another physical display. Set 'target' or 'text' to the monitor number (e.g. target='2' for Display 2, or target='1' for Display 1). Use whenever the user asks you to operate on another screen or when an application is opened on another monitor!\n\n"
             "   [Skill System & Executables]\n"
             "   - 'skill': activate a domain skill into your persistent system instructions. Set 'text' to skill name (e.g. 'unity', 'windows-power').\n"
             "   - 'run_skill_script': execute a pre-tested helper script from a skill. Set 'target' to skill name and 'text' to script filename.\n\n"
@@ -1976,6 +2039,37 @@ class AgentLoop:
                         rolling_history.append(types.Content(
                             role="user",
                             parts=[types.Part(text=f"[READ_SCREEN_TEXT RESULT]\n{summary_text}")],
+                        ))
+                        await asyncio.sleep(0.2)
+
+                    # ── switch_monitor (Switch Active Screen Capture Display) ───
+                    elif action_type == "switch_monitor":
+                        raw_idx = action_param.monitor_index or action_param.target or action_param.text
+                        target_idx = None
+                        if raw_idx is not None:
+                            m = re.search(r"\d+", str(raw_idx))
+                            if m:
+                                target_idx = int(m.group())
+
+                        all_monitors = get_monitors_info()
+                        if target_idx is not None and self.set_monitor_index(target_idx):
+                            active_info = self.get_active_monitor_info()
+                            msg = f"🖥️ Switched active display to Display {self.monitor_index} ({active_info.get('width')}x{active_info.get('height')})"
+                            await self.send_status(msg)
+                            await self.send_json({
+                                "type": "monitor_changed",
+                                "monitor_index": self.monitor_index,
+                                "monitors": all_monitors,
+                            })
+                            res_text = f"Successfully switched active monitor to Display {self.monitor_index} ({active_info.get('width')}x{active_info.get('height')}). Subsequent screen captures and actions will target this display."
+                        else:
+                            mon_list_str = ", ".join([f"Display {m['index']}" for m in all_monitors])
+                            res_text = f"Failed to switch monitor (invalid index '{raw_idx}'). Available monitors: {mon_list_str}."
+                            await self.send_status(f"⚠️ {res_text}")
+
+                        rolling_history.append(types.Content(
+                            role="user",
+                            parts=[types.Part(text=f"[SWITCH_MONITOR RESULT]\n{res_text}")],
                         ))
                         await asyncio.sleep(0.2)
 

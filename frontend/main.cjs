@@ -181,7 +181,20 @@ app.whenReady().then(async () => {
     );
 
     if (overlayWindow && hasVisualTarget) {
-      overlayWindow.webContents.send('draw-bbox', data);
+      const bounds = overlayWindow.getBounds();
+      // Ensure coordinates are mapped relative to the active display's overlay window bounds
+      const localData = {
+        ...data,
+        x: (data.x != null && data.x > 0) ? Math.max(0, data.x - bounds.x) : data.x,
+        y: (data.y != null && data.y > 0) ? Math.max(0, data.y - bounds.y) : data.y,
+        bbox: data.bbox ? [
+          data.bbox[0] - bounds.x,
+          data.bbox[1] - bounds.y,
+          data.bbox[2],
+          data.bbox[3]
+        ] : [0, 0, 0, 0]
+      };
+      overlayWindow.webContents.send('draw-bbox', localData);
       overlayWindow.showInactive();
     } else if (overlayWindow) {
       overlayWindow.hide();
@@ -192,6 +205,38 @@ app.whenReady().then(async () => {
       mainWindow.show();
       mainWindow.setAlwaysOnTop(true);
       mainWindow.setAlwaysOnTop(false);
+    }
+  });
+
+  ipcMain.on('set-active-display', (event, { displayIndex }) => {
+    try {
+      const { screen } = require('electron');
+      const displays = screen.getAllDisplays();
+      const targetDisplay = displays[(displayIndex || 1) - 1] || screen.getPrimaryDisplay();
+      if (overlayWindow && !overlayWindow.isDestroyed() && targetDisplay) {
+        overlayWindow.setBounds(targetDisplay.bounds);
+      }
+    } catch (err) {
+      console.error('Error setting active display:', err);
+    }
+  });
+
+  ipcMain.handle('get-displays', async () => {
+    try {
+      const { screen } = require('electron');
+      const displays = screen.getAllDisplays();
+      const primary = screen.getPrimaryDisplay();
+      return displays.map((d, i) => ({
+        index: i + 1,
+        id: d.id,
+        name: `Display ${i + 1}${d.id === primary.id ? ' (Primary)' : ''}`,
+        bounds: d.bounds,
+        isPrimary: d.id === primary.id,
+        scaleFactor: d.scaleFactor
+      }));
+    } catch (err) {
+      console.error('Error getting displays:', err);
+      return [];
     }
   });
 

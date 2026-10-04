@@ -5,13 +5,17 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from typing import Dict, Optional
 from pydantic import BaseModel
 try:
-    from .agent import AgentLoop
+    from .agent import AgentLoop, get_monitors_info
     from .artifacts_manager import artifacts_manager
 except ImportError:
-    from agent import AgentLoop
+    from agent import AgentLoop, get_monitors_info
     from artifacts_manager import artifacts_manager
 
 router = APIRouter()
+
+@router.get("/api/monitors")
+async def list_monitors():
+    return {"monitors": get_monitors_info()}
 
 DEFAULT_PROJECTS_DIR = os.getenv(
     "CASTOR_PROJECTS_DIR",
@@ -92,7 +96,7 @@ class ConnectionManager:
         agent_loop = AgentLoop(websocket)
         self.active_connections[websocket] = agent_loop
 
-        # Send init state with available skills and projects
+        # Send init state with available skills, projects, and connected displays
         try:
             from . import skills_manager
             available_skills = skills_manager.get_all_skills()
@@ -100,7 +104,9 @@ class ConnectionManager:
                 "type": "init_state",
                 "available_skills": list(available_skills.keys()),
                 "active_skills": [],
-                "default_projects_dir": os.path.abspath(DEFAULT_PROJECTS_DIR)
+                "default_projects_dir": os.path.abspath(DEFAULT_PROJECTS_DIR),
+                "monitors": get_monitors_info(),
+                "active_monitor": agent_loop.monitor_index,
             })
         except Exception as e:
             print(f"Error sending init state: {e}")
@@ -161,6 +167,23 @@ async def websocket_endpoint(websocket: WebSocket):
 
             elif action == "skip_question":
                 agent_loop.provide_question_answers([{"skipped": True}])
+
+            elif action == "select_monitor":
+                idx = data.get("monitor_index", 1)
+                success = agent_loop.set_monitor_index(idx)
+                await manager.send_message({
+                    "type": "monitor_changed",
+                    "monitor_index": agent_loop.monitor_index,
+                    "monitors": get_monitors_info(),
+                    "success": success
+                }, websocket)
+
+            elif action == "get_monitors":
+                await manager.send_message({
+                    "type": "monitors_list",
+                    "monitors": get_monitors_info(),
+                    "active_monitor": agent_loop.monitor_index
+                }, websocket)
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
