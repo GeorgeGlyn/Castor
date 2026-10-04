@@ -27,7 +27,8 @@ jobs:
 
     - name: Syntax and Import Check
       run: |
-        python -m py_compile backend/*.py
+        python -m compileall -q -x "\.venv" backend
+
 
   frontend-build:
     name: Frontend Build Verification
