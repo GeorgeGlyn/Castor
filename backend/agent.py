@@ -4,6 +4,7 @@ import time
 import asyncio
 import subprocess
 import json
+import traceback
 try:
     import pyperclip
 except ImportError:
@@ -367,6 +368,7 @@ class AgentLoop:
         self.diff_threshold = float(os.getenv("SCREEN_DIFF_THRESHOLD", "1.0"))
         self.question_event = asyncio.Event()
         self.user_answers: list = []
+        self.current_scratchpad: dict | None = None
 
     def set_monitor_index(self, index: int) -> bool:
         """Sets active monitor index for screen captures and interactions."""
@@ -1042,11 +1044,12 @@ class AgentLoop:
             completed_steps=[],
             tasks=initial_tasks,
         )
+        self.current_scratchpad = current_scratchpad.model_dump()
 
         # Broadcast initial roadmap to frontend immediately!
         await self.websocket.send_json({
             "type": "scratchpad_update",
-            "scratchpad": current_scratchpad.model_dump(),
+            "scratchpad": self.current_scratchpad,
         })
 
         last_action_types: list[str] = []
@@ -1207,9 +1210,11 @@ class AgentLoop:
 
                 # Update scratchpad display
                 current_scratchpad = planner_response.scratchpad
+                if current_scratchpad:
+                    self.current_scratchpad = current_scratchpad.model_dump() if hasattr(current_scratchpad, "model_dump") else current_scratchpad
                 await self.websocket.send_json({
                     "type": "scratchpad_update",
-                    "scratchpad": current_scratchpad.model_dump(),
+                    "scratchpad": self.current_scratchpad,
                 })
 
                 # Broadcast direct message to user if provided by planner
