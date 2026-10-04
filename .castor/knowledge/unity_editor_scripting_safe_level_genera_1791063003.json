@@ -1,0 +1,13 @@
+{
+  "id": "unity_editor_scripting_safe_level_genera_1791063003",
+  "title": "Unity Editor Scripting & Safe Level Generation",
+  "summary": "How to build levels procedurally using [MenuItem], checking EditorApplication.isPlaying to prevent InvalidOperationException.",
+  "content": "# Unity Editor Scripting & Safe Procedural Generation\n\n## 1. Safe Scene Creation in Edit Mode vs Play Mode\n- Calling EditorSceneManager.NewScene() during Play Mode throws:\n  `InvalidOperationException: This cannot be used during play mode, please use SceneManager.CreateScene() instead.`\n- Before creating or modifying scenes in an Editor script:\n  if (EditorApplication.isPlaying) {\n      Debug.LogWarning(\"Cannot rebuild scene while in Play Mode. Stopping Play Mode first.\");\n      EditorApplication.isPlaying = false;\n      return;\n  }\n\n## 2. Procedural Block Creation with Primitive Sprites\n- If project has no external sprites, generate clean solid colored textures procedurally or use built-in UI sprites.\n\n## 3. Saving the Procedural Scene\n- After instantiating GameObjects in the Editor:\n  UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(\n      UnityEngine.SceneManagement.SceneManager.GetActiveScene()\n  );",
+  "tags": [
+    "unity",
+    "editor-scripting",
+    "level-builder",
+    "procedural"
+  ],
+  "created_at": "2026-10-03T21:30:03Z"
+}

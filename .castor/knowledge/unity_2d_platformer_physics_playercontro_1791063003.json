@@ -1,0 +1,13 @@
+{
+  "id": "unity_2d_platformer_physics_playercontro_1791063003",
+  "title": "Unity 2D Platformer Physics & PlayerController2D",
+  "summary": "Best practices for Rigidbody2D, linearVelocity in Unity 6, ground checking with OverlapCircle/BoxCast, and Goomba stomp detection.",
+  "content": "# Unity 2D Platformer Physics & PlayerController2D\n\n## 1. Velocity in Unity 6 (6000.x)\n- In Unity 6 and later, rb.velocity produces a deprecation warning.\n- Always use `rb.linearVelocity = new Vector2(horizontal * speed, rb.linearVelocity.y);` for horizontal motion.\n- Preserve vertical velocity when moving horizontally.\n\n## 2. Robust Ground Check\n- Do NOT rely solely on OnCollisionStay2D which can jitter on tile seams.\n- Use `Physics2D.OverlapCircle(groundCheckPoint.position, checkRadius, groundLayerMask)` or `Physics2D.BoxCast`.\n\n## 3. Goomba Stomp Detection\n- When Mario collides with an enemy:\n  - Check if Mario is falling (`rb.linearVelocity.y < 0`) AND Mario's feet are above the enemy center.\n  - Call `enemy.TakeStomp()` or `enemy.Die()`.\n  - Apply jump bounce: `rb.linearVelocity = new Vector2(rb.linearVelocity.x, bounceForce);`.\n  - Otherwise, Mario takes damage.\n\n## 4. Collision Layers\n- Ground: Layer 'Ground' or Tag 'Ground'.\n- Enemies: Layer 'Enemy' or Tag 'Enemy'.\n- Player: Layer 'Player'.",
+  "tags": [
+    "unity",
+    "2d-physics",
+    "player-controller",
+    "mario"
+  ],
+  "created_at": "2026-10-03T21:30:03Z"
+}

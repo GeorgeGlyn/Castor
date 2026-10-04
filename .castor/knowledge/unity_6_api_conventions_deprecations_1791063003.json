@@ -1,0 +1,12 @@
+{
+  "id": "unity_6_api_conventions_deprecations_1791063003",
+  "title": "Unity 6 API Conventions & Deprecations",
+  "summary": "Critical Unity 6 changes: Rigidbody2D.linearVelocity replaces .velocity; SceneManager.CreateScene in Play Mode vs EditorSceneManager.NewScene in Edit Mode.",
+  "content": "# Unity 6 API Conventions & Deprecations\n\n## 1. Rigidbody2D.velocity -> Rigidbody2D.linearVelocity\n- Unity 6 deprecated `rb.velocity` and `rb.angularVelocity`.\n- Always use `rb.linearVelocity`.\n\n## 2. Scene Dirtying\n- Always call `UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(scene)` after procedural generation so Ctrl+S or Editor save persists changes.\n\n## 3. LevelBuilder MenuItem Placement\n- Place in `Assets/Scripts/Editor/LevelBuilder.cs` inside `[MenuItem(\"Tools/Build Super Mario Level 1\")]`.\n- Must be in an `Editor` folder so it compiles only in the Unity Editor assembly.",
+  "tags": [
+    "unity-6",
+    "api-changes",
+    "best-practices"
+  ],
+  "created_at": "2026-10-03T21:30:03Z"
+}
