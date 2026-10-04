@@ -673,6 +673,70 @@ function ChatWindow() {
   });
   const [pendingPlan, setPendingPlan] = useState(null);
 
+  // ── Reference Images Upload & Clipboard State ─────────────────────────────
+  const [attachedImages, setAttachedImages] = useState([]);
+  const fileInputRef = useRef(null);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const [lightboxImage, setLightboxImage] = useState(null);
+
+  const handleAddImageFile = (file) => {
+    if (!file || !file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target.result;
+      setAttachedImages((prev) => {
+        if (prev.includes(dataUrl)) return prev;
+        return [...prev, dataUrl];
+      });
+      playSoundCue('start_mic');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handlePaste = (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    let hasImage = false;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          handleAddImageFile(file);
+          hasImage = true;
+        }
+      }
+    }
+    if (hasImage) {
+      setAgentStatus('📎 Attached reference image from clipboard');
+    }
+  };
+
+  const handleFileSelect = (e) => {
+    const files = Array.from(e.target.files || []);
+    files.forEach(handleAddImageFile);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setIsDraggingOver(true);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    setIsDraggingOver(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDraggingOver(false);
+    const files = Array.from(e.dataTransfer?.files || []);
+    files.forEach(handleAddImageFile);
+  };
+
   // ── Antigravity Parity: Slash Commands Autocomplete State ───────────────────
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [slashSelectedIdx, setSlashSelectedIdx] = useState(0);
@@ -1509,9 +1573,10 @@ function ChatWindow() {
   const startGoal = (overrideGoalText = null, overrideMode = null) => {
     const ws = wsRef.current;
     const rawGoal = overrideGoalText !== null ? overrideGoalText : goal;
-    if (!ws || !rawGoal.trim() || isAgentRunning) return;
+    const currentImages = overrideGoalText !== null ? [] : [...attachedImages];
+    if (!ws || (!rawGoal.trim() && currentImages.length === 0) || isAgentRunning) return;
 
-    const goalText = rawGoal.trim();
+    const goalText = rawGoal.trim() || (currentImages.length > 0 ? 'Please inspect the attached reference image(s) and implement whatever changes or improvements are required.' : '');
     const effectiveMode = overrideMode || composerMode;
     currentThoughtRef.current = '';
 
@@ -1538,7 +1603,15 @@ function ChatWindow() {
       return {
         title: newTitle,
         project: chat.project || activeProject,
-        messages: [...(chat.messages || []), { role: 'user', text: goalText, mode: effectiveMode }],
+        messages: [
+          ...(chat.messages || []),
+          {
+            role: 'user',
+            text: goalText,
+            mode: effectiveMode,
+            images: currentImages,
+          },
+        ],
         scratchpad: null,
       };
     });
@@ -1553,10 +1626,12 @@ function ChatWindow() {
         history: priorHistory,
         mode: effectiveMode,
         custom_instructions: customInstructions,
+        reference_images: currentImages,
       })
     );
     if (overrideGoalText === null) {
       setGoal('');
+      setAttachedImages([]);
     }
     setIsAgentRunning(true);
     setIsThinking(true);
@@ -2162,8 +2237,28 @@ function ChatWindow() {
               if (msg.role === 'user') {
                 return (
                   <div key={i} className="flex justify-end">
-                    <div className="bg-zinc-800 text-zinc-200 px-4 py-2.5 rounded-2xl rounded-br-sm max-w-[80%] text-sm shadow-sm border border-zinc-700/50">
-                      {msg.text}
+                    <div className="bg-zinc-800 text-zinc-200 px-4 py-2.5 rounded-2xl rounded-br-sm max-w-[80%] text-sm shadow-sm border border-zinc-700/50 space-y-2">
+                      {msg.images && msg.images.length > 0 && (
+                        <div className="flex flex-wrap gap-2 pt-0.5 pb-1">
+                          {msg.images.map((img, imgIdx) => (
+                            <div
+                              key={imgIdx}
+                              onClick={() => setLightboxImage(img)}
+                              className="relative group/thumb cursor-pointer overflow-hidden rounded-xl border border-zinc-700/80 hover:border-blue-400 bg-zinc-900 shadow-md transition-all"
+                            >
+                              <img
+                                src={img}
+                                alt={`Reference ${imgIdx + 1}`}
+                                className="h-28 max-w-[200px] object-cover transition-transform group-hover/thumb:scale-105"
+                              />
+                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/thumb:opacity-100 flex items-center justify-center transition-opacity text-white text-[11px] font-medium backdrop-blur-[1px]">
+                                🔍 Click to zoom
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div>{msg.text}</div>
                     </div>
                   </div>
                 );
@@ -2652,7 +2747,58 @@ function ChatWindow() {
               </div>
             )}
 
-            <div className="relative bg-[#18181b] border border-zinc-800 rounded-2xl shadow-2xl focus-within:border-zinc-700 focus-within:ring-1 focus-within:ring-zinc-700 transition-all">
+            <div
+              className={`relative bg-[#18181b] border rounded-2xl shadow-2xl focus-within:border-zinc-700 focus-within:ring-1 focus-within:ring-zinc-700 transition-all ${
+                isDraggingOver ? 'border-blue-500 bg-blue-950/20 ring-2 ring-blue-500/40' : 'border-zinc-800'
+              }`}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onPaste={handlePaste}
+            >
+              {isDraggingOver && (
+                <div className="absolute inset-0 z-20 bg-blue-950/50 border-2 border-dashed border-blue-400 rounded-2xl flex items-center justify-center backdrop-blur-xs pointer-events-none">
+                  <div className="flex items-center gap-2 text-blue-200 text-sm font-medium">
+                    <span className="text-xl">📥</span>
+                    <span>Drop reference image here</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Attached Images Preview Strip */}
+              {attachedImages.length > 0 && (
+                <div className="px-3.5 pt-3 pb-1 flex flex-wrap gap-2 items-center border-b border-zinc-800/60">
+                  {attachedImages.map((img, idx) => (
+                    <div
+                      key={idx}
+                      className="relative group rounded-lg overflow-hidden border border-zinc-700/80 bg-zinc-900 shadow-sm"
+                    >
+                      <img
+                        src={img}
+                        alt={`Reference ${idx + 1}`}
+                        className="h-14 w-14 object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                        onClick={() => setLightboxImage(img)}
+                        title="Click to preview"
+                      />
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setAttachedImages((prev) => prev.filter((_, i) => i !== idx));
+                        }}
+                        className="absolute top-0.5 right-0.5 w-4 h-4 bg-black/80 hover:bg-red-600 text-white rounded-full flex items-center justify-center text-[10px] leading-none transition-colors opacity-90 group-hover:opacity-100"
+                        title="Remove image"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                  <span className="text-[11px] text-zinc-400 font-mono ml-1">
+                    {attachedImages.length} reference {attachedImages.length === 1 ? 'image' : 'images'}
+                  </span>
+                </div>
+              )}
+
               <TextareaAutosize
                 minRows={1}
                 maxRows={8}
@@ -2832,6 +2978,36 @@ function ChatWindow() {
 
                 {/* Voice Input & Submit Buttons */}
                 <div className="flex items-center gap-1.5">
+                  {/* File Upload Attachment Button */}
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    accept="image/*"
+                    multiple
+                    onChange={handleFileSelect}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={!isConnected || isAgentRunning}
+                    className={`p-1.5 rounded-lg transition-all flex items-center justify-center relative ${
+                      attachedImages.length > 0
+                        ? 'bg-blue-600/20 text-blue-400 border border-blue-500/40 hover:bg-blue-600/30'
+                        : 'text-zinc-400 hover:text-zinc-200 bg-zinc-800/80 hover:bg-zinc-750'
+                    }`}
+                    title="Attach reference image(s) from files or clipboard (Ctrl+V supported)"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                    </svg>
+                    {attachedImages.length > 0 && (
+                      <span className="absolute -top-1 -right-1 w-4 h-4 bg-blue-500 text-white rounded-full text-[9px] font-bold flex items-center justify-center shadow">
+                        {attachedImages.length}
+                      </span>
+                    )}
+                  </button>
+
                   <button
                     type="button"
                     onClick={toggleVoiceInput}
@@ -2856,7 +3032,7 @@ function ChatWindow() {
 
                   <button
                     onClick={() => startGoal()}
-                    disabled={!isConnected || !goal.trim() || isAgentRunning}
+                    disabled={!isConnected || (!goal.trim() && attachedImages.length === 0) || isAgentRunning}
                     className={`p-1.5 rounded-lg transition-all flex items-center justify-center shadow-sm disabled:bg-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed ${
                       composerMode === 'plan'
                         ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
@@ -3049,6 +3225,42 @@ function ChatWindow() {
               {selectedCropModal.bbox && selectedCropModal.bbox[2] > 0 && (
                 <span>BBox: {selectedCropModal.bbox[2]}×{selectedCropModal.bbox[3]}px</span>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reference Image Lightbox Modal */}
+      {lightboxImage && (
+        <div
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setLightboxImage(null)}
+        >
+          <div
+            className="bg-[#121216] border border-zinc-700 rounded-2xl max-w-4xl max-h-[90vh] w-full p-4 shadow-2xl flex flex-col space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-2.5">
+              <div className="flex items-center gap-2">
+                <span className="text-base">🖼️</span>
+                <span className="text-sm font-semibold text-zinc-100">
+                  Reference Image
+                </span>
+              </div>
+              <button
+                onClick={() => setLightboxImage(null)}
+                className="text-zinc-400 hover:text-zinc-200 text-sm font-mono w-7 h-7 flex items-center justify-center rounded-lg hover:bg-zinc-800 transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 flex items-center justify-center bg-black/60 rounded-xl p-2 border border-zinc-800/80 overflow-hidden">
+              <img
+                src={lightboxImage}
+                alt="Reference preview"
+                className="max-h-[75vh] w-auto max-w-full object-contain rounded-lg shadow-xl"
+              />
             </div>
           </div>
         </div>

@@ -139,6 +139,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 history = data.get("history", [])
                 mode = data.get("mode", "agent")
                 custom_instructions = data.get("custom_instructions")
+                reference_images = data.get("reference_images", [])
                 if goal:
                     async def run_safe():
                         try:
@@ -149,6 +150,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                 history=history,
                                 mode=mode,
                                 custom_instructions=custom_instructions,
+                                reference_images=reference_images,
                             )
                         except Exception as e:
                             import traceback

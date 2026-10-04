@@ -5,6 +5,7 @@ import asyncio
 import subprocess
 import json
 import traceback
+import base64
 try:
     import pyperclip
 except ImportError:
@@ -737,6 +738,7 @@ class AgentLoop:
         history: list[dict] | None = None,
         mode: str = "agent",
         custom_instructions: str | None = None,
+        reference_images: list[str] | None = None,
     ):
         self.current_project_path = project_path
         if not self.current_project_path:
@@ -1006,6 +1008,54 @@ class AgentLoop:
 
         base_history.append(types.Content(role="user", parts=[types.Part(text=f"Goal: {clean_goal}")]))
 
+        # Process and attach user reference images (from file upload or clipboard paste)
+        ref_image_parts = []
+        if reference_images:
+            for idx, ref_item in enumerate(reference_images, 1):
+                try:
+                    if isinstance(ref_item, str) and ref_item.startswith("data:"):
+                        header, b64_str = ref_item.split(",", 1)
+                        mime = header.split(";")[0].replace("data:", "") or "image/png"
+                        raw_bytes = base64.b64decode(b64_str)
+                    elif isinstance(ref_item, str) and os.path.exists(ref_item):
+                        with open(ref_item, "rb") as f:
+                            raw_bytes = f.read()
+                        mime = "image/png" if ref_item.lower().endswith(".png") else "image/jpeg"
+                    else:
+                        raw_bytes = base64.b64decode(ref_item)
+                        mime = "image/png"
+
+                    # Persist reference image inside project directory if available
+                    if self.current_project_path:
+                        ref_dir = os.path.join(self.current_project_path, ".castor", "reference_images")
+                        os.makedirs(ref_dir, exist_ok=True)
+                        ext = "png" if "png" in mime else "jpg"
+                        ref_file = os.path.join(ref_dir, f"reference_{idx}.{ext}")
+                        with open(ref_file, "wb") as rf:
+                            rf.write(raw_bytes)
+
+                    ref_image_parts.append(types.Part(
+                        inline_data=types.Blob(data=raw_bytes, mime_type=mime)
+                    ))
+                except Exception as ref_err:
+                    print(f"[Castor] Reference image {idx} processing error: {ref_err}")
+
+            if ref_image_parts:
+                await self.send_status(f"🖼️ Attached {len(ref_image_parts)} reference image(s) from user.")
+                ref_guidance = (
+                    f"\n\n=== USER REFERENCE IMAGES ({len(ref_image_parts)} ATTACHED) ===\n"
+                    "The user provided visual reference image(s) above (e.g. UI mockup, design reference, error screenshot, wireframe).\n"
+                    "CRITICAL VISUAL COMPLIANCE RULES:\n"
+                    "1. Study these reference images with top priority.\n"
+                    "2. Make whatever changes, code implementations, or asset additions are necessary to faithfully reflect or fix what is shown in these images.\n"
+                    "3. If implementing UI, align layout, element positioning, colors, text labels, and styling directly with the reference images.\n"
+                    "4. If troubleshooting an error shown in a reference screenshot, diagnose and resolve that exact problem."
+                )
+                base_history.append(types.Content(
+                    role="user",
+                    parts=[types.Part(text=f"User Reference Image(s) ({len(ref_image_parts)} attached):")] + ref_image_parts + [types.Part(text=ref_guidance)],
+                ))
+
         # Check for matching skills to advise the planner to load them
         matched_skills = await skills_manager.get_or_create_skills_for_goal(
             goal=clean_goal,
@@ -1145,8 +1195,12 @@ class AgentLoop:
                     types.Part(text=scratchpad_ctx),
                     types.Part(text="Current desktop screenshot:"),
                     pil_to_part(scaled_img),
-                    types.Part(text="What is the next action to take towards the goal?"),
                 ]
+                if ref_image_parts:
+                    planner_parts.append(types.Part(
+                        text=f"[VISUAL REFERENCE ACTIVE: {len(ref_image_parts)} user reference image(s) attached in initial turn. Ensure changes, layout, and style match the reference.]"
+                    ))
+                planner_parts.append(types.Part(text="What is the next action to take towards the goal?"))
                 request_content = types.Content(role="user", parts=planner_parts)
 
                 # Rolling history: base goal + last N turns
