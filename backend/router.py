@@ -1,7 +1,7 @@
 import os
 import re
 import asyncio
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Response
 from typing import Dict, Optional
 from pydantic import BaseModel
 try:
@@ -94,7 +94,158 @@ async def get_project_artifact(artifact_id: str, project_path: Optional[str] = N
     art = artifacts_manager.get_artifact(artifact_id, project_path)
     if not art:
         return {"error": f"Artifact '{artifact_id}' not found", "found": False}
-    return {"artifact": art.model_dump(), "found": True}
+    data = art.model_dump() if hasattr(art, "model_dump") else art
+    return {"artifact": data, "found": True}
+
+@router.get("/api/artifacts/{artifact_id}/raw")
+async def get_artifact_raw(artifact_id: str, project_path: Optional[str] = None):
+    art = artifacts_manager.get_artifact(artifact_id, project_path)
+    if not art:
+        return Response(content="Artifact not found", status_code=404, media_type="text/plain; charset=utf-8")
+    data = art.model_dump() if hasattr(art, "model_dump") else art
+    content = data.get("content", "")
+    filename = (data.get("filename") or "").lower()
+    art_type = (data.get("type") or "").lower()
+
+    if filename.endswith((".html", ".htm")) or art_type in ("html", "web"):
+        return Response(content=content, media_type="text/html; charset=utf-8")
+    elif filename.endswith(".svg") or art_type in ("svg", "vector"):
+        return Response(content=content, media_type="image/svg+xml; charset=utf-8")
+    elif filename.endswith(".json") or art_type == "json":
+        return Response(content=content, media_type="application/json; charset=utf-8")
+    elif filename.endswith(".md") or art_type == "markdown":
+        return Response(content=content, media_type="text/markdown; charset=utf-8")
+    elif filename.endswith((".js", ".jsx", ".ts", ".tsx")):
+        return Response(content=content, media_type="text/javascript; charset=utf-8")
+    elif filename.endswith(".css"):
+        return Response(content=content, media_type="text/css; charset=utf-8")
+    else:
+        return Response(content=content, media_type="text/plain; charset=utf-8")
+
+class SandboxBundleRequest(BaseModel):
+    artifact_id: Optional[str] = None
+    content: Optional[str] = None
+    title: Optional[str] = "Sandbox Live Preview"
+    type: Optional[str] = "html"
+    project_path: Optional[str] = None
+
+@router.post("/api/artifacts/sandbox-bundle")
+async def sandbox_bundle(req: SandboxBundleRequest):
+    content = req.content
+    eff_type = (req.type or "html").lower()
+    if not content and req.artifact_id:
+        art = artifacts_manager.get_artifact(req.artifact_id, req.project_path)
+        if art:
+            data = art.model_dump() if hasattr(art, "model_dump") else art
+            content = data.get("content", "")
+            eff_type = (data.get("type") or eff_type).lower()
+
+    content = content or ""
+
+    interceptor_script = """<script>
+(function() {
+  function sendLog(level, args) {
+    try {
+      var msgs = Array.prototype.slice.call(args).map(function(arg) {
+        if (typeof arg === 'object') {
+          try { return JSON.stringify(arg); } catch(e) { return String(arg); }
+        }
+        return String(arg);
+      });
+      window.parent.postMessage({
+        type: 'CASTOR_SANDBOX_LOG',
+        level: level,
+        message: msgs.join(' '),
+        timestamp: new Date().toLocaleTimeString()
+      }, '*');
+    } catch(e) {}
+  }
+  var origLog = console.log;
+  var origWarn = console.warn;
+  var origError = console.error;
+  console.log = function() { sendLog('info', arguments); origLog.apply(console, arguments); };
+  console.warn = function() { sendLog('warn', arguments); origWarn.apply(console, arguments); };
+  console.error = function() { sendLog('error', arguments); origError.apply(console, arguments); };
+  window.onerror = function(msg, url, line, col, err) {
+    sendLog('error', [msg + (line ? ' (Line ' + line + ')' : '')]);
+    return false;
+  };
+  window.addEventListener('unhandledrejection', function(event) {
+    sendLog('error', ['Unhandled Promise Rejection: ' + (event.reason ? (event.reason.message || event.reason) : 'Unknown')]);
+  });
+})();
+</script>"""
+
+    if eff_type in ("html", "web"):
+        if "<!DOCTYPE" not in content and "<html" not in content.lower():
+            bundled_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{req.title}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  {interceptor_script}
+</head>
+<body class="bg-slate-900 text-slate-100 p-4 font-sans antialiased min-h-screen">
+  {content}
+</body>
+</html>"""
+        else:
+            if "</head>" in content:
+                bundled_html = content.replace("</head>", f"{interceptor_script}\n</head>", 1)
+            elif "</body>" in content:
+                bundled_html = content.replace("</body>", f"{interceptor_script}\n</body>", 1)
+            else:
+                bundled_html = f"{interceptor_script}\n{content}"
+    elif eff_type in ("svg", "vector"):
+        bundled_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>{req.title} - SVG Vector</title>
+  <style>
+    body {{
+      margin: 0;
+      padding: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background: #0f172a;
+      background-image: radial-gradient(#1e293b 1px, transparent 1px);
+      background-size: 16px 16px;
+    }}
+    .svg-container {{
+      max-width: 95vw;
+      max-height: 90vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      filter: drop-shadow(0 10px 25px rgba(0,0,0,0.5));
+    }}
+    svg {{
+      width: 100%;
+      height: 100%;
+      max-height: 85vh;
+    }}
+  </style>
+  {interceptor_script}
+</head>
+<body>
+  <div class="svg-container">
+    {content}
+  </div>
+</body>
+</html>"""
+    else:
+        bundled_html = content
+
+    return {
+        "success": True,
+        "type": eff_type,
+        "html": bundled_html
+    }
  
 @router.get("/api/providers")
 async def list_providers():
