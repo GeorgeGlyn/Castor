@@ -53,8 +53,27 @@ class ArtifactManager:
     ) -> Tuple[bool, dict]:
         """Create or update an interactive artifact document."""
         clean_filename = self._slugify(filename.strip())
-        if not clean_filename.endswith((".md", ".txt", ".json", ".cs", ".py", ".js")):
+        valid_exts = (".md", ".txt", ".json", ".cs", ".py", ".js", ".html", ".htm", ".svg", ".jsx", ".tsx", ".css")
+        
+        # Infer type or enforce proper extension
+        eff_type = artifact_type.lower().strip() if artifact_type else "markdown"
+        if eff_type in ("html", "web"):
+            eff_type = "html"
+            if not clean_filename.endswith((".html", ".htm")):
+                clean_filename += ".html"
+        elif eff_type in ("svg", "vector"):
+            eff_type = "svg"
+            if not clean_filename.endswith(".svg"):
+                clean_filename += ".svg"
+        elif not clean_filename.endswith(valid_exts):
             clean_filename += ".md"
+
+        if clean_filename.endswith((".html", ".htm")):
+            eff_type = "html"
+        elif clean_filename.endswith(".svg"):
+            eff_type = "svg"
+        elif clean_filename.endswith(".md"):
+            eff_type = "markdown"
 
         target_dir = self._get_workspace_dir(workspace_path)
         file_path = os.path.join(target_dir, clean_filename)
@@ -76,7 +95,7 @@ class ArtifactManager:
             "filename": clean_filename,
             "title": title.strip() if title else clean_filename,
             "content": content,
-            "type": artifact_type.lower().strip(),
+            "type": eff_type,
             "path": os.path.abspath(file_path),
             "file_path": os.path.abspath(file_path),
             "created_at": created_at,
@@ -103,7 +122,16 @@ class ArtifactManager:
     ) -> ArtifactItem:
         """Create a new artifact returning an ArtifactItem."""
         slug = self._slugify(title)
-        filename = f"{slug}.md" if not slug.endswith(".md") else slug
+        eff_type = artifact_type.lower().strip()
+        if eff_type in ("html", "web"):
+            filename = f"{slug}.html" if not slug.endswith((".html", ".htm")) else slug
+        elif eff_type in ("svg", "vector"):
+            filename = f"{slug}.svg" if not slug.endswith(".svg") else slug
+        elif not slug.endswith((".md", ".txt", ".json", ".cs", ".py", ".js", ".html", ".svg")):
+            filename = f"{slug}.md"
+        else:
+            filename = slug
+
         ok, data = self.save_artifact(
             filename=filename,
             title=title,

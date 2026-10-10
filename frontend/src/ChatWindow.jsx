@@ -467,162 +467,669 @@ const PlanReviewCard = ({
   );
 };
 
+// ── Simple Markdown Renderer for Living Docs ──────────────────────────────
+const SimpleMarkdownRenderer = ({ content }) => {
+  if (!content) return null;
+  const lines = content.split('\n');
+  const elements = [];
+  let inCodeBlock = false;
+  let codeBuffer = [];
+  let codeLang = '';
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (line.startsWith('```')) {
+      if (inCodeBlock) {
+        const codeText = codeBuffer.join('\n');
+        elements.push(
+          <div key={`code-${i}`} className="my-3 rounded-lg overflow-hidden border border-zinc-800 bg-zinc-950 shadow-sm">
+            <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-900 border-b border-zinc-800 text-[11px] font-mono text-zinc-400">
+              <span>{codeLang || 'text'}</span>
+              <button
+                type="button"
+                onClick={() => navigator.clipboard.writeText(codeText)}
+                className="hover:text-zinc-200 transition-colors"
+                title="Copy code block"
+              >
+                Copy
+              </button>
+            </div>
+            <pre className="p-3 text-xs font-mono text-zinc-300 overflow-x-auto leading-relaxed">
+              <code>{codeText}</code>
+            </pre>
+          </div>
+        );
+        codeBuffer = [];
+        inCodeBlock = false;
+        codeLang = '';
+      } else {
+        inCodeBlock = true;
+        codeLang = line.replace('```', '').trim();
+      }
+      continue;
+    }
+
+    if (inCodeBlock) {
+      codeBuffer.push(line);
+      continue;
+    }
+
+    // Headers
+    if (line.startsWith('# ')) {
+      elements.push(<h1 key={i} className="text-xl font-bold text-zinc-100 mt-4 mb-2 pb-1 border-b border-zinc-800">{line.slice(2)}</h1>);
+    } else if (line.startsWith('## ')) {
+      elements.push(<h2 key={i} className="text-lg font-semibold text-blue-400 mt-3 mb-1.5">{line.slice(3)}</h2>);
+    } else if (line.startsWith('### ')) {
+      elements.push(<h3 key={i} className="text-sm font-semibold text-zinc-200 mt-2.5 mb-1">{line.slice(4)}</h3>);
+    } else if (line.startsWith('> ')) {
+      elements.push(
+        <blockquote key={i} className="border-l-2 border-blue-500 pl-3 py-1 my-2 bg-blue-950/20 text-zinc-300 text-xs italic rounded-r">
+          {line.slice(2)}
+        </blockquote>
+      );
+    } else if (line.startsWith('- ') || line.startsWith('* ')) {
+      elements.push(
+        <li key={i} className="text-xs text-zinc-300 ml-4 list-disc my-0.5">
+          {line.slice(2)}
+        </li>
+      );
+    } else if (/^\d+\.\s/.test(line)) {
+      const match = line.match(/^\d+\.\s/);
+      elements.push(
+        <li key={i} className="text-xs text-zinc-300 ml-4 list-decimal my-0.5">
+          {line.slice(match[0].length)}
+        </li>
+      );
+    } else if (line.trim() === '') {
+      elements.push(<div key={i} className="h-2" />);
+    } else {
+      elements.push(<p key={i} className="text-xs text-zinc-300 leading-relaxed my-1">{line}</p>);
+    }
+  }
+
+  return <div className="space-y-0.5">{elements}</div>;
+};
+
+// ── Interactive Live Artifact Sandbox (Phase 10) ───────────────────────────
+const LiveArtifactSandbox = ({ artifact, isMaximized, onToggleMaximize }) => {
+  const [viewMode, setViewMode] = useState('preview'); // 'preview' | 'code'
+  const [device, setDevice] = useState('desktop'); // 'desktop' | 'tablet' | 'mobile'
+  const [zoom, setZoom] = useState(100);
+  const [copied, setCopied] = useState(false);
+  const [consoleOpen, setConsoleOpen] = useState(false);
+  const [consoleLogs, setConsoleLogs] = useState([]);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [svgBg, setSvgBg] = useState('dark'); // 'dark' | 'grid' | 'light'
+
+  if (!artifact) return null;
+
+  const content = artifact.content || '';
+  const rawType = (artifact.type || '').toLowerCase();
+  const filename = (artifact.filename || '').toLowerCase();
+
+  const isHtml = rawType === 'html' || rawType === 'web' || filename.endsWith('.html') || filename.endsWith('.htm');
+  const isSvg = rawType === 'svg' || rawType === 'vector' || filename.endsWith('.svg') || content.trim().startsWith('<svg');
+  const isMarkdown = rawType === 'markdown' || rawType === 'doc' || filename.endsWith('.md');
+
+  // Listen to intercepted console/error messages from sandbox iframe
+  useEffect(() => {
+    const handleMsg = (e) => {
+      if (e.data && e.data.type === 'CASTOR_SANDBOX_LOG') {
+        setConsoleLogs((prev) => [
+          ...prev.slice(-99),
+          {
+            id: Date.now() + Math.random(),
+            level: e.data.level || 'info',
+            message: e.data.message || '',
+            timestamp: e.data.timestamp || new Date().toLocaleTimeString(),
+          },
+        ]);
+        if (e.data.level === 'error') {
+          setConsoleOpen(true);
+        }
+      }
+    };
+    window.addEventListener('message', handleMsg);
+    return () => window.removeEventListener('message', handleMsg);
+  }, []);
+
+  // Clear logs on artifact switch
+  useEffect(() => {
+    setConsoleLogs([]);
+    setConsoleOpen(false);
+  }, [artifact.id]);
+
+  const errorCount = consoleLogs.filter((l) => l.level === 'error').length;
+  const warnCount = consoleLogs.filter((l) => l.level === 'warn').length;
+
+  const interceptorScript = `
+    <script>
+      (function() {
+        function sendLog(level, args) {
+          try {
+            var msgs = Array.prototype.slice.call(args).map(function(arg) {
+              if (typeof arg === 'object') {
+                try { return JSON.stringify(arg); } catch(e) { return String(arg); }
+              }
+              return String(arg);
+            });
+            window.parent.postMessage({
+              type: 'CASTOR_SANDBOX_LOG',
+              level: level,
+              message: msgs.join(' '),
+              timestamp: new Date().toLocaleTimeString()
+            }, '*');
+          } catch(e) {}
+        }
+        var origLog = console.log;
+        var origWarn = console.warn;
+        var origError = console.error;
+        console.log = function() { sendLog('info', arguments); origLog.apply(console, arguments); };
+        console.warn = function() { sendLog('warn', arguments); origWarn.apply(console, arguments); };
+        console.error = function() { sendLog('error', arguments); origError.apply(console, arguments); };
+        window.onerror = function(msg, url, line, col, err) {
+          sendLog('error', [msg + (line ? ' (Line ' + line + ')' : '')]);
+          return false;
+        };
+        window.addEventListener('unhandledrejection', function(event) {
+          sendLog('error', ['Unhandled Promise Rejection: ' + (event.reason ? (event.reason.message || event.reason) : 'Unknown')]);
+        });
+      })();
+    </script>
+  `;
+
+  const bundleHtml = () => {
+    if (!content) return '';
+    let html = content;
+    if (!html.includes('<!DOCTYPE') && !html.toLowerCase().includes('<html')) {
+      html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+  ${interceptorScript}
+</head>
+<body class="bg-slate-900 text-slate-100 p-4 font-sans antialiased min-h-screen">
+  ${html}
+</body>
+</html>`;
+    } else {
+      if (html.includes('</head>')) {
+        html = html.replace('</head>', `${interceptorScript}\n</head>`);
+      } else if (html.includes('</body>')) {
+        html = html.replace('</body>', `${interceptorScript}\n</body>`);
+      } else {
+        html = `${interceptorScript}\n${html}`;
+      }
+    }
+    return html;
+  };
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleOpenRaw = () => {
+    if (artifact.id) {
+      window.open(`http://localhost:8000/api/artifacts/${encodeURIComponent(artifact.id)}/raw`, '_blank');
+    } else {
+      const blob = new Blob([content], { type: isHtml ? 'text/html' : 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+    }
+  };
+
+  const deviceWidthClass =
+    device === 'mobile'
+      ? 'w-[375px] max-w-full shadow-2xl rounded-2xl border-4 border-zinc-700/80 my-4'
+      : device === 'tablet'
+      ? 'w-[768px] max-w-full shadow-2xl rounded-xl border-2 border-zinc-700/70 my-3'
+      : 'w-full h-full';
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0 bg-[#0b0c10] select-text">
+      {/* ── Sub-header / Sandbox Toolbar ── */}
+      <div className="px-3 py-2 bg-zinc-900/90 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-base">
+            {isHtml ? '🌐' : isSvg ? '🎨' : isMarkdown ? '📑' : '💻'}
+          </span>
+          <div className="min-w-0">
+            <h3 className="font-semibold text-zinc-100 truncate text-xs">{artifact.title || artifact.filename}</h3>
+            <span className="text-[10px] font-mono text-zinc-400">
+              {artifact.type?.toUpperCase() || 'DOCUMENT'} • {artifact.filename || 'virtual'}
+            </span>
+          </div>
+        </div>
+
+        {/* View Mode & Viewport Controls */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {/* Mode Switcher */}
+          <div className="flex items-center bg-zinc-950 p-0.5 rounded-lg border border-zinc-800 text-[11px]">
+            <button
+              type="button"
+              onClick={() => setViewMode('preview')}
+              className={`px-2.5 py-1 rounded-md font-medium transition-all ${
+                viewMode === 'preview' ? 'bg-blue-600 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              👁️ Preview
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('code')}
+              className={`px-2.5 py-1 rounded-md font-medium transition-all ${
+                viewMode === 'code' ? 'bg-blue-600 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              💻 Code
+            </button>
+          </div>
+
+          {/* Device Viewports (for HTML/Web preview) */}
+          {viewMode === 'preview' && isHtml && (
+            <div className="flex items-center bg-zinc-950 p-0.5 rounded-lg border border-zinc-800 text-[11px]">
+              <button
+                type="button"
+                onClick={() => setDevice('desktop')}
+                title="Desktop Viewport"
+                className={`p-1 px-1.5 rounded-md ${device === 'desktop' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}
+              >
+                🖥️
+              </button>
+              <button
+                type="button"
+                onClick={() => setDevice('tablet')}
+                title="Tablet Viewport (768px)"
+                className={`p-1 px-1.5 rounded-md ${device === 'tablet' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}
+              >
+                📱 <span className="text-[9px]">Tab</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setDevice('mobile')}
+                title="Mobile Viewport (375px)"
+                className={`p-1 px-1.5 rounded-md ${device === 'mobile' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}
+              >
+                📱 <span className="text-[9px]">Mob</span>
+              </button>
+            </div>
+          )}
+
+          {/* SVG Background Toggle */}
+          {viewMode === 'preview' && isSvg && (
+            <div className="flex items-center bg-zinc-950 p-0.5 rounded-lg border border-zinc-800 text-[10px]">
+              <button
+                type="button"
+                onClick={() => setSvgBg('dark')}
+                className={`px-2 py-0.5 rounded ${svgBg === 'dark' ? 'bg-zinc-800 text-white' : 'text-zinc-400'}`}
+              >
+                Dark
+              </button>
+              <button
+                type="button"
+                onClick={() => setSvgBg('grid')}
+                className={`px-2 py-0.5 rounded ${svgBg === 'grid' ? 'bg-zinc-800 text-white' : 'text-zinc-400'}`}
+              >
+                Grid
+              </button>
+              <button
+                type="button"
+                onClick={() => setSvgBg('light')}
+                className={`px-2 py-0.5 rounded ${svgBg === 'light' ? 'bg-zinc-800 text-white' : 'text-zinc-400'}`}
+              >
+                Light
+              </button>
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          <div className="flex items-center gap-1">
+            {isHtml && viewMode === 'preview' && (
+              <button
+                type="button"
+                onClick={() => setRefreshKey((k) => k + 1)}
+                title="Refresh Sandbox Frame"
+                className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors border border-zinc-700/60"
+              >
+                🔄
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleOpenRaw}
+              title="Open Raw in Browser Window"
+              className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors border border-zinc-700/60"
+            >
+              🌐
+            </button>
+            <button
+              type="button"
+              onClick={handleCopy}
+              title="Copy Code to Clipboard"
+              className="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors border border-zinc-700/60 text-[11px]"
+            >
+              {copied ? '✓ Copied' : 'Copy'}
+            </button>
+            <button
+              type="button"
+              onClick={onToggleMaximize}
+              title={isMaximized ? 'Restore Drawer' : 'Maximize Live Sandbox'}
+              className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors border border-zinc-700/60 text-[11px]"
+            >
+              {isMaximized ? '🗗' : '⛶'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Sandbox Main Stage ── */}
+      <div className="flex-1 flex flex-col min-h-0 relative overflow-hidden">
+        {viewMode === 'preview' ? (
+          <div className="flex-1 flex flex-col min-h-0">
+            {isHtml ? (
+              <div className="flex-1 bg-zinc-950 flex flex-col items-center justify-center overflow-auto p-2 min-h-0 relative">
+                <iframe
+                  key={refreshKey}
+                  title="Castor Sandbox Preview"
+                  srcDoc={bundleHtml()}
+                  sandbox="allow-scripts allow-forms allow-same-origin allow-modals"
+                  className={`bg-white transition-all duration-200 ${deviceWidthClass}`}
+                  style={{
+                    height: device === 'desktop' ? '100%' : device === 'mobile' ? '667px' : '820px',
+                    transform: zoom !== 100 ? `scale(${zoom / 100})` : 'none',
+                    transformOrigin: 'top center',
+                  }}
+                />
+              </div>
+            ) : isSvg ? (
+              <div
+                className={`flex-1 flex items-center justify-center p-6 overflow-auto transition-colors ${
+                  svgBg === 'dark'
+                    ? 'bg-[#090a0f]'
+                    : svgBg === 'light'
+                    ? 'bg-slate-100'
+                    : 'bg-[#12131a] [background-image:radial-gradient(#27273a_1px,transparent_1px)] [background-size:16px_16px]'
+                }`}
+              >
+                <div
+                  className="max-w-full max-h-full flex items-center justify-center filter drop-shadow-xl"
+                  dangerouslySetInnerHTML={{ __html: content }}
+                  style={{
+                    transform: zoom !== 100 ? `scale(${zoom / 100})` : 'none',
+                    transformOrigin: 'center center',
+                  }}
+                />
+              </div>
+            ) : isMarkdown ? (
+              <div className="flex-1 overflow-y-auto p-5 bg-[#0d0d12]">
+                <SimpleMarkdownRenderer content={content} />
+              </div>
+            ) : (
+              <div className="flex-1 overflow-y-auto p-4 bg-[#09090d] font-mono text-xs text-zinc-300">
+                <pre className="whitespace-pre-wrap">{content}</pre>
+              </div>
+            )}
+
+            {/* Collapsible Console Log Drawer for HTML/Web */}
+            {isHtml && (
+              <div className="border-t border-zinc-800 bg-[#0d0e14] shrink-0">
+                <div
+                  onClick={() => setConsoleOpen(!consoleOpen)}
+                  className="px-3 py-1.5 flex items-center justify-between text-xs cursor-pointer hover:bg-zinc-800/60 transition-colors select-none"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[11px] text-zinc-400">🖥️ Sandbox Console</span>
+                    {errorCount > 0 && (
+                      <span className="px-1.5 py-0.2 rounded-full bg-red-500/20 text-red-400 text-[10px] font-mono font-bold border border-red-500/30">
+                        {errorCount} Error{errorCount > 1 ? 's' : ''}
+                      </span>
+                    )}
+                    {warnCount > 0 && (
+                      <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-400 text-[10px] font-mono border border-amber-500/30">
+                        {warnCount} Warn{warnCount > 1 ? 's' : ''}
+                      </span>
+                    )}
+                    {consoleLogs.length > 0 && errorCount === 0 && warnCount === 0 && (
+                      <span className="text-[10px] text-zinc-500 font-mono">({consoleLogs.length} logs)</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {consoleLogs.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConsoleLogs([]);
+                        }}
+                        className="text-[10px] text-zinc-500 hover:text-zinc-300 px-1.5 py-0.5 rounded bg-zinc-800/80 hover:bg-zinc-700 transition-colors"
+                      >
+                        Clear
+                      </button>
+                    )}
+                    <span className="text-zinc-500 text-[10px]">{consoleOpen ? '▼' : '▲'}</span>
+                  </div>
+                </div>
+
+                {consoleOpen && (
+                  <div className="h-40 overflow-y-auto p-2 bg-[#08080c] font-mono text-[11px] space-y-1 select-text">
+                    {consoleLogs.length === 0 ? (
+                      <div className="text-zinc-600 text-center py-4 italic">No console logs or errors recorded.</div>
+                    ) : (
+                      consoleLogs.map((log) => (
+                        <div
+                          key={log.id}
+                          className={`flex items-start gap-2 px-2 py-1 rounded text-xs ${
+                            log.level === 'error'
+                              ? 'bg-red-950/40 text-red-300 border-l-2 border-red-500'
+                              : log.level === 'warn'
+                              ? 'bg-amber-950/30 text-amber-300 border-l-2 border-amber-500'
+                              : 'text-zinc-300 hover:bg-zinc-900'
+                          }`}
+                        >
+                          <span className="text-[9px] text-zinc-500 shrink-0 mt-0.5">{log.timestamp}</span>
+                          <span
+                            className={`text-[9px] uppercase font-bold shrink-0 mt-0.5 px-1 py-0.2 rounded ${
+                              log.level === 'error'
+                                ? 'bg-red-500/20 text-red-400'
+                                : log.level === 'warn'
+                                ? 'bg-amber-500/20 text-amber-400'
+                                : 'bg-zinc-800 text-zinc-400'
+                            }`}
+                          >
+                            {log.level}
+                          </span>
+                          <span className="break-all whitespace-pre-wrap">{log.message}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto p-4 bg-[#08080c] font-mono text-xs text-zinc-300 select-text flex flex-col">
+            <div className="flex items-center justify-between pb-2 mb-2 border-b border-zinc-800/80 text-[10px] text-zinc-500">
+              <span>{content.split('\n').length} lines • {content.length} characters</span>
+              <span>UTF-8</span>
+            </div>
+            <pre className="whitespace-pre-wrap leading-relaxed text-zinc-200">{content}</pre>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // ── Artifacts & Action Replay Sidecar Drawer (Antigravity Parity) ──────────
 const SidecarDrawer = ({ isOpen, onClose, artifacts, activeArtifact, onSelectArtifact, scratchpad }) => {
   const [activeTab, setActiveTab] = useState('artifacts');
-  const [copied, setCopied] = useState(false);
+  const [isMaximized, setIsMaximized] = useState(false);
   if (!isOpen) return null;
 
   const current = activeArtifact || artifacts[0] || null;
   const completedSteps = scratchpad?.completed_steps || [];
 
-  const handleCopy = () => {
-    if (current?.content) {
-      navigator.clipboard.writeText(current.content);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
   return (
-    <div className="fixed inset-y-0 right-0 w-full sm:w-[480px] lg:w-[560px] bg-[#0d0d10] border-l border-zinc-800 shadow-2xl z-40 flex flex-col animate-in slide-in-from-right duration-200">
-      {/* Drawer Header with Dual Tabs */}
-      <div className="h-12 px-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/80">
-        <div className="flex items-center gap-1.5 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
-          <button
-            onClick={() => setActiveTab('artifacts')}
-            className={`px-3 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all ${
-              activeTab === 'artifacts'
-                ? 'bg-blue-600 text-white shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            <span>📄</span>
-            <span>Artifacts</span>
-            <span className="text-[10px] font-mono opacity-80">({artifacts.length})</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('timeline')}
-            className={`px-3 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all ${
-              activeTab === 'timeline'
-                ? 'bg-blue-600 text-white shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            <span>⏪</span>
-            <span>Action Replay</span>
-            <span className="text-[10px] font-mono opacity-80">({completedSteps.length})</span>
-          </button>
+    <>
+      {/* Backdrop overlay when maximized */}
+      {isMaximized && (
+        <div
+          className="fixed inset-0 bg-black/75 backdrop-blur-sm z-40 transition-opacity"
+          onClick={() => setIsMaximized(false)}
+        />
+      )}
+
+      <div
+        className={`fixed bg-[#0d0d10] border-zinc-800 shadow-2xl z-40 flex flex-col transition-all duration-200 ${
+          isMaximized
+            ? 'inset-3 md:inset-6 rounded-2xl border border-blue-500/30 overflow-hidden ring-1 ring-blue-500/20'
+            : 'inset-y-0 right-0 w-full sm:w-[540px] lg:w-[680px] border-l animate-in slide-in-from-right'
+        }`}
+      >
+        {/* Drawer Header with Dual Tabs */}
+        <div className="h-12 px-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/90 shrink-0">
+          <div className="flex items-center gap-1.5 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
+            <button
+              type="button"
+              onClick={() => setActiveTab('artifacts')}
+              className={`px-3 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                activeTab === 'artifacts'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <span>📄</span>
+              <span>Artifacts Sandbox</span>
+              <span className="text-[10px] font-mono opacity-80">({artifacts.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('timeline')}
+              className={`px-3 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                activeTab === 'timeline'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <span>⏪</span>
+              <span>Action Replay</span>
+              <span className="text-[10px] font-mono opacity-80">({completedSteps.length})</span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setIsMaximized(!isMaximized)}
+              title={isMaximized ? 'Restore Drawer' : 'Maximize Sandbox'}
+              className="text-zinc-400 hover:text-zinc-200 p-1.5 rounded-lg hover:bg-zinc-800 transition-colors"
+            >
+              {isMaximized ? '🗗' : '⛶'}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              title="Close Drawer"
+              className="text-zinc-400 hover:text-zinc-200 p-1.5 rounded-lg hover:bg-zinc-800 transition-colors"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
-        <button
-          onClick={onClose}
-          className="text-zinc-400 hover:text-zinc-200 p-1.5 rounded-lg hover:bg-zinc-800 transition-colors"
-        >
-          ✕
-        </button>
-      </div>
-
-      {/* ── TAB 1: Artifacts View ── */}
-      {activeTab === 'artifacts' && (
-        <div className="flex-1 flex flex-col min-h-0">
-          {/* Artifacts Tabs */}
-          {artifacts.length > 0 && (
-            <div className="flex items-center gap-1.5 px-3 py-2 border-b border-zinc-800/80 overflow-x-auto bg-zinc-950/60 scrollbar-none">
-              {artifacts.map((art) => {
-                const isSel = current?.id === art.id;
-                return (
-                  <button
-                    key={art.id}
-                    onClick={() => onSelectArtifact(art)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
-                      isSel
-                        ? 'bg-blue-600 text-white shadow-sm'
-                        : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
-                    }`}
-                  >
-                    <span>{art.type === 'diagram' ? '📊' : art.type === 'code' ? '💻' : '📝'}</span>
-                    <span className="truncate max-w-[140px]">{art.title}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Content Body */}
-          <div className="flex-1 overflow-y-auto p-4 select-text">
-            {current ? (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between pb-2 border-b border-zinc-800/80">
-                  <div>
-                    <h3 className="text-sm font-semibold text-zinc-100">{current.title}</h3>
-                    <p className="text-[10px] font-mono text-zinc-500 mt-0.5">{current.file_path || current.path}</p>
-                  </div>
-                  <button
-                    onClick={handleCopy}
-                    className="text-xs bg-zinc-800 hover:bg-zinc-750 text-zinc-300 hover:text-white px-2.5 py-1 rounded-md transition-colors border border-zinc-700/60"
-                  >
-                    {copied ? '✓ Copied' : 'Copy'}
-                  </button>
-                </div>
-
-                <div className="bg-[#09090b] border border-zinc-800/80 rounded-xl p-4 font-mono text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap">
-                  {current.content}
-                </div>
+        {/* ── TAB 1: Artifacts View ── */}
+        {activeTab === 'artifacts' && (
+          <div className="flex-1 flex flex-col min-h-0">
+            {/* Artifacts Selection Bar */}
+            {artifacts.length > 0 && (
+              <div className="flex items-center gap-1.5 px-3 py-2 border-b border-zinc-800/80 overflow-x-auto bg-zinc-950/70 scrollbar-none shrink-0">
+                {artifacts.map((art) => {
+                  const isSel = current?.id === art.id;
+                  const artType = (art.type || '').toLowerCase();
+                  return (
+                    <button
+                      key={art.id}
+                      type="button"
+                      onClick={() => onSelectArtifact(art)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+                        isSel
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
+                      }`}
+                    >
+                      <span>{artType === 'html' || artType === 'web' ? '🌐' : artType === 'svg' ? '🎨' : artType === 'code' ? '💻' : '📝'}</span>
+                      <span className="truncate max-w-[150px]">{art.title || art.filename}</span>
+                    </button>
+                  );
+                })}
               </div>
+            )}
+
+            {current ? (
+              <LiveArtifactSandbox
+                artifact={current}
+                isMaximized={isMaximized}
+                onToggleMaximize={() => setIsMaximized(!isMaximized)}
+              />
             ) : (
-              <div className="flex flex-col items-center justify-center h-full text-center text-zinc-500">
-                <div className="text-3xl mb-2">📑</div>
-                <p className="text-sm font-medium text-zinc-400">No artifacts generated yet</p>
-                <p className="text-xs text-zinc-600 max-w-xs mt-1">
-                  Ask Castor to plan an architecture with <code className="text-blue-400 font-mono">/plan</code> or create specs to see living documents here.
+              <div className="flex flex-col items-center justify-center flex-1 text-center text-zinc-500 p-8">
+                <div className="text-4xl mb-3">📑</div>
+                <p className="text-sm font-medium text-zinc-300">No artifacts generated yet</p>
+                <p className="text-xs text-zinc-500 max-w-sm mt-1">
+                  Ask Castor to build a web component, generate an SVG, formulate architecture with <code className="text-blue-400 font-mono">/plan</code>, or create specs to see living interactive sandboxes here.
                 </p>
               </div>
             )}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* ── TAB 2: Action Replay Timeline View ── */}
-      {activeTab === 'timeline' && (
-        <div className="flex-1 overflow-y-auto p-4 select-text space-y-3">
-          {completedSteps.length > 0 ? (
-            <div className="space-y-2.5">
-              <div className="flex items-center justify-between pb-2 border-b border-zinc-800/60 text-xs text-zinc-400">
-                <span className="font-semibold text-zinc-300">Chronological Execution Log</span>
-                <span className="font-mono text-[10px] text-zinc-500">{completedSteps.length} Total Steps</span>
-              </div>
-              {completedSteps.map((step, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-start gap-3 p-3 bg-zinc-900/60 hover:bg-zinc-900 border border-zinc-800/80 rounded-xl text-xs transition-colors"
-                >
-                  <div className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40 flex items-center justify-center text-[10px] font-mono font-bold shrink-0 mt-0.5">
-                    {idx + 1}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-zinc-200 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
-                      {step}
-                    </p>
-                  </div>
-                  <span className="text-[9px] font-mono uppercase bg-zinc-800 text-zinc-400 px-1.5 py-0.5 rounded shrink-0">
-                    Done
-                  </span>
+        {/* ── TAB 2: Action Replay Timeline View ── */}
+        {activeTab === 'timeline' && (
+          <div className="flex-1 overflow-y-auto p-4 select-text space-y-3">
+            {completedSteps.length > 0 ? (
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between pb-2 border-b border-zinc-800/60 text-xs text-zinc-400">
+                  <span className="font-semibold text-zinc-300">Chronological Execution Log</span>
+                  <span className="font-mono text-[10px] text-zinc-500">{completedSteps.length} Total Steps</span>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full text-center text-zinc-500 py-16">
-              <div className="text-3xl mb-2">⏱️</div>
-              <p className="text-sm font-medium text-zinc-400">No actions executed yet</p>
-              <p className="text-xs text-zinc-600 max-w-xs mt-1">
-                When Castor clicks, edits files, generates assets, or runs terminal tests, every step will appear in this audit replay timeline.
-              </p>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+                {completedSteps.map((step, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-start gap-3 p-3 bg-zinc-900/60 hover:bg-zinc-900 border border-zinc-800/80 rounded-xl text-xs transition-colors"
+                  >
+                    <div className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40 flex items-center justify-center text-[10px] font-mono font-bold shrink-0 mt-0.5">
+                      {idx + 1}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-zinc-200 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
+                        {step}
+                      </p>
+                    </div>
+                    <span className="text-[9px] font-mono uppercase bg-zinc-800 text-zinc-400 px-1.5 py-0.5 rounded shrink-0">
+                      Done
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-center text-zinc-500 py-16">
+                <div className="text-3xl mb-2">⏱️</div>
+                <p className="text-sm font-medium text-zinc-400">No actions executed yet</p>
+                <p className="text-xs text-zinc-600 max-w-xs mt-1">
+                  When Castor clicks, edits files, generates assets, or runs terminal tests, every step will appear in this audit replay timeline.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </>
   );
 };
 
