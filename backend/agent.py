@@ -6,6 +6,7 @@ import subprocess
 import json
 import traceback
 import base64
+import re
 try:
     import pyperclip
 except ImportError:
@@ -2233,11 +2234,12 @@ class AgentLoop:
                                     f"3. Make minimal, surgical fixes with 'replace_file_content'.\n"
                                     f"4. Re-run tests with 'run_tests' until all tests pass."
                                 )
-                                sub_ok, sub_report = await asyncio.to_thread(
-                                    run_subagent,
-                                    prompt=repair_prompt,
-                                    current_project_path=self.current_project_path,
-                                    max_steps=8,
+                                sub_ok, sub_report = await run_subagent(
+                                    task_prompt=repair_prompt,
+                                    cwd=self.current_project_path,
+                                    api_key=self.api_key,
+                                    model_name=self.planner_model,
+                                    max_turns=8,
                                 )
                                 # Re-verify after repair attempt
                                 ok, res_text = await asyncio.to_thread(
