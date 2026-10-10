@@ -7,6 +7,7 @@ Provides 0-latency instant text clicks and full-screen text scraping without LLM
 import os
 import sys
 import re
+import difflib
 from typing import Optional
 from PIL import Image
 
@@ -14,6 +15,27 @@ try:
     import winocr
 except ImportError:
     winocr = None
+
+
+# Common GUI Icon & Symbol Semantic Aliases
+ICON_GLYPH_MAP = {
+    "close": ["✕", "✖", "x", "X", "×"],
+    "play": ["▶", "►", ">"],
+    "run": ["▶", "►", ">"],
+    "pause": ["⏸", "||"],
+    "stop": ["⏹", "■"],
+    "add": ["+", "＋"],
+    "new": ["+", "＋"],
+    "plus": ["+", "＋"],
+    "settings": ["⚙", "options"],
+    "search": ["🔍", "find", "search"],
+    "menu": ["≡", "☰", "..."],
+    "more": ["...", "⋮", "⋯"],
+    "minimize": ["—", "_", "–", "-"],
+    "maximize": ["□", "▢"],
+    "expand": ["▼", "⌄", "v"],
+    "collapse": ["▲", "⌃", "^"],
+}
 
 
 class OcrEngine:
@@ -93,10 +115,12 @@ class OcrEngine:
         monitor: dict,
     ) -> Optional[dict]:
         """
-        Fast Text-Anchor search:
-        Searches on-screen text for an exact or high-confidence match with `target`.
-        Returns dict with 'px', 'py', 'bbox' [x, y, w, h], 'matched_text', 'source'='local_ocr',
-        or None if not found or ambiguous.
+        Astra-Grade Precision Screen Anchor search:
+        1. Relative Spatial Anchoring (e.g. 'button to the right of Save', 'input below Username')
+        2. Exact Word / Line match
+        3. Icon & Symbol glyph matching (e.g. 'play', 'close', 'add')
+        4. Substring multi-word match
+        5. Fuzzy match with Levenshtein ratio >= 0.82
         """
         if not self.is_available:
             return None
@@ -112,9 +136,57 @@ class OcrEngine:
         elif " -> " in clean_target:
             clean_target = clean_target.split(" -> ")[-1].strip()
 
+        # ── 1. Relative Spatial Anchoring ─────────────────────────────────────
+        # Pattern: (button/icon/input)? (to the right of|below|above|to the left of) <target>
+        rel_match = re.match(
+            r'^(?:(?:the\s+)?(?:button|icon|input|field|box|checkbox|toggle)\s+)?(to the right of|right of|next to|to the left of|left of|below|under|underneath|above|over)\s+(.+)$',
+            clean_target,
+            flags=re.IGNORECASE,
+        )
+        if rel_match:
+            direction = rel_match.group(1).lower()
+            anchor_query = rel_match.group(2).strip()
+            base_anchor = await self.find_anchor(anchor_query, img, monitor)
+            if base_anchor:
+                bx, by = base_anchor["px"], base_anchor["py"]
+                bbox = base_anchor["bbox"]
+                bw, bh = bbox[2], bbox[3]
+
+                if "right" in direction or "next to" in direction:
+                    offset_x = max(24, int(bw * 0.75))
+                    new_px = bbox[0] + bw + offset_x
+                    new_py = by
+                    new_bbox = [bbox[0] + bw + 4, bbox[1], max(32, bw), bh]
+                elif "left" in direction:
+                    offset_x = max(24, int(bw * 0.75))
+                    new_px = bbox[0] - offset_x
+                    new_py = by
+                    new_bbox = [max(0, bbox[0] - offset_x - 10), bbox[1], max(32, bw), bh]
+                elif "below" in direction or "under" in direction:
+                    offset_y = max(20, int(bh * 0.75))
+                    new_px = bx
+                    new_py = bbox[1] + bh + offset_y
+                    new_bbox = [bbox[0], bbox[1] + bh + 4, bw, max(24, bh)]
+                elif "above" in direction or "over" in direction:
+                    offset_y = max(20, int(bh * 0.75))
+                    new_px = bx
+                    new_py = bbox[1] - offset_y
+                    new_bbox = [bbox[0], max(0, bbox[1] - offset_y - 10), bw, max(24, bh)]
+                else:
+                    new_px, new_py, new_bbox = bx, by, bbox
+
+                return {
+                    "px": int(new_px),
+                    "py": int(new_py),
+                    "bbox": new_bbox,
+                    "matched_text": f"{direction} '{base_anchor['matched_text']}'",
+                    "is_micro_target": False,
+                    "source": "relative_spatial_anchor",
+                }
+
         # Remove natural language prefixes and suffixes
         clean_target = re.sub(r'^(the\s+|click\s+|select\s+|button\s+)', '', clean_target, flags=re.IGNORECASE)
-        clean_target = re.sub(r'(\s+button|\s+tab|\s+menu|\s+item|\s+option)$', '', clean_target, flags=re.IGNORECASE).strip()
+        clean_target = re.sub(r'(\s+button|\s+tab|\s+menu|\s+item|\s+option|\s+icon)$', '', clean_target, flags=re.IGNORECASE).strip()
 
         if not clean_target:
             return None
@@ -127,47 +199,55 @@ class OcrEngine:
         mon_left = monitor.get("left", 0)
         mon_top = monitor.get("top", 0)
 
-        # 1. Exact Word Match Check (e.g. target="File", "Edit", "Play", "Terminal", "README.md")
+        # ── 2. Exact Word Match (e.g. target="File", "Edit", "Play", "Terminal") ──
         for line in entries:
             for w in line.get("words", []):
                 w_text = w["text"].lower()
-                # Clean punctuation on word edge for comparison
                 w_clean = re.sub(r'^[^\w]+|[^\w]+$', '', w_text)
                 target_clean = re.sub(r'^[^\w]+|[^\w]+$', '', target_lower)
                 if w_clean == target_clean and len(target_clean) >= 2:
-                    px = w["cx"] + mon_left
-                    py = w["cy"] + mon_top
-                    bbox = [w["x"] + mon_left, w["y"] + mon_top, w["w"], w["h"]]
                     return {
-                        "px": px,
-                        "py": py,
-                        "bbox": bbox,
+                        "px": w["cx"] + mon_left,
+                        "py": w["cy"] + mon_top,
+                        "bbox": [w["x"] + mon_left, w["y"] + mon_top, w["w"], w["h"]],
                         "matched_text": w["text"],
                         "is_micro_target": w["w"] < 40 or w["h"] < 30,
                         "source": "local_ocr",
                     }
 
-        # 2. Exact Line Match Check (e.g. target="Build Settings", "New Terminal", "Save As...")
+        # ── 3. Icon & Symbol Glyph Matching ───────────────────────────────────
+        target_glyphs = ICON_GLYPH_MAP.get(target_lower, [])
+        if target_glyphs:
+            for line in entries:
+                for w in line.get("words", []):
+                    w_t = w["text"].strip()
+                    if w_t in target_glyphs:
+                        return {
+                            "px": w["cx"] + mon_left,
+                            "py": w["cy"] + mon_top,
+                            "bbox": [w["x"] + mon_left, w["y"] + mon_top, w["w"], w["h"]],
+                            "matched_text": f"icon '{w_t}' ({target_lower})",
+                            "is_micro_target": True,
+                            "source": "icon_glyph_match",
+                        }
+
+        # ── 4. Exact Line Match Check (e.g. target="Build Settings", "New Terminal") ─
         for line in entries:
             l_text = line["text"].lower()
             if target_lower == l_text or target_lower == re.sub(r'^[^\w]+|[^\w]+$', '', l_text):
-                px = line["cx"] + mon_left
-                py = line["cy"] + mon_top
-                bbox = [line["x"] + mon_left, line["y"] + mon_top, line["w"], line["h"]]
                 return {
-                    "px": px,
-                    "py": py,
-                    "bbox": bbox,
+                    "px": line["cx"] + mon_left,
+                    "py": line["cy"] + mon_top,
+                    "bbox": [line["x"] + mon_left, line["y"] + mon_top, line["w"], line["h"]],
                     "matched_text": line["text"],
                     "is_micro_target": line["w"] < 40 or line["h"] < 30,
                     "source": "local_ocr",
                 }
 
-        # 3. Multi-word Substring in Line
+        # ── 5. Multi-word Substring in Line ───────────────────────────────────
         for line in entries:
             l_text = line["text"].lower()
             if target_lower in l_text and len(target_lower) >= 4:
-                # If target spans specific words inside line, find their combined bounding box
                 matching_words = [
                     w for w in line.get("words", [])
                     if w["text"].lower() in target_lower or target_lower in w["text"].lower()
@@ -179,17 +259,52 @@ class OcrEngine:
                     m_b = max(w["y"] + w["h"] for w in matching_words)
                     m_w = m_r - m_x
                     m_h = m_b - m_y
-                    px = int(m_x + m_w / 2.0) + mon_left
-                    py = int(m_y + m_h / 2.0) + mon_top
-                    bbox = [m_x + mon_left, m_y + mon_top, m_w, m_h]
                     return {
-                        "px": px,
-                        "py": py,
-                        "bbox": bbox,
+                        "px": int(m_x + m_w / 2.0) + mon_left,
+                        "py": int(m_y + m_h / 2.0) + mon_top,
+                        "bbox": [m_x + mon_left, m_y + mon_top, m_w, m_h],
                         "matched_text": " ".join(w["text"] for w in matching_words),
                         "is_micro_target": m_w < 40 or m_h < 30,
                         "source": "local_ocr",
                     }
+
+        # ── 6. High-Confidence Fuzzy Match (SequenceMatcher ratio >= 0.82) ────
+        best_fuzzy = None
+        best_ratio = 0.82
+
+        for line in entries:
+            # Check line ratio
+            l_clean = line["text"].strip().lower()
+            ratio_l = difflib.SequenceMatcher(None, target_lower, l_clean).ratio()
+            if ratio_l > best_ratio and len(target_lower) >= 4:
+                best_ratio = ratio_l
+                best_fuzzy = {
+                    "px": line["cx"] + mon_left,
+                    "py": line["cy"] + mon_top,
+                    "bbox": [line["x"] + mon_left, line["y"] + mon_top, line["w"], line["h"]],
+                    "matched_text": f"{line['text']} (fuzzy {int(ratio_l*100)}%)",
+                    "is_micro_target": line["w"] < 40 or line["h"] < 30,
+                    "source": "fuzzy_ocr_match",
+                }
+
+            # Check individual word ratios
+            for w in line.get("words", []):
+                w_clean = re.sub(r'^[^\w]+|[^\w]+$', '', w["text"].lower())
+                if len(w_clean) >= 3 and len(target_lower) >= 3:
+                    ratio_w = difflib.SequenceMatcher(None, target_lower, w_clean).ratio()
+                    if ratio_w > best_ratio:
+                        best_ratio = ratio_w
+                        best_fuzzy = {
+                            "px": w["cx"] + mon_left,
+                            "py": w["cy"] + mon_top,
+                            "bbox": [w["x"] + mon_left, w["y"] + mon_top, w["w"], w["h"]],
+                            "matched_text": f"{w['text']} (fuzzy {int(ratio_w*100)}%)",
+                            "is_micro_target": w["w"] < 40 or w["h"] < 30,
+                            "source": "fuzzy_ocr_match",
+                        }
+
+        if best_fuzzy:
+            return best_fuzzy
 
         return None
 

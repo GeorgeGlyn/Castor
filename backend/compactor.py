@@ -127,8 +127,32 @@ class ConversationCompactor:
             return True, new_history
 
         except Exception as e:
-            print(f"[Compactor] Compaction error: {e}")
-            return False, rolling_history
+            print(f"[Compactor] LLM Compaction notice: {e}. Generating deterministic milestone summary fallback.")
+            action_lines = []
+            for item in history_snippets[-16:]:
+                for line in item.splitlines():
+                    clean_l = line.strip()
+                    if any(k in clean_l for k in ["Executing:", "RESULT", "Output:", "Wrote", "Replaced", "Goal:", "Task", "VERIFIED"]):
+                        action_lines.append(f"- {clean_l[:120]}")
+
+            fallback_summary = (
+                f"<summary>\n"
+                f"### 1. Task Overview\n- Goal: {goal or 'In progress'}\n\n"
+                f"### 2. Progress & Completed Milestones\n" + ("\n".join(action_lines[:15]) if action_lines else "- Intermediate actions logged in transcript.") + "\n\n"
+                f"### 3. Active Context\n- Workspace: {workspace_path or 'active workspace'}\n"
+                f"### 4. Next Steps\n- Continue with current planned milestone in scratchpad.\n"
+                f"</summary>"
+            )
+            compacted_anchor = types.Content(
+                role="user",
+                parts=[types.Part(text=(
+                    "# RESUMING FROM CONVERSATION COMPACTION\n"
+                    "Earlier conversation history was compacted to optimize context memory:\n\n"
+                    f"{fallback_summary}\n\n"
+                    "Proceed seamlessly with the next steps outlined above."
+                ))]
+            )
+            return True, [compacted_anchor] + recent_turns
 
 
 # Singleton instance

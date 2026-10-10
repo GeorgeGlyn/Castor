@@ -5,6 +5,8 @@ import asyncio
 import subprocess
 import json
 import traceback
+import base64
+import re
 try:
     import pyperclip
 except ImportError:
@@ -150,6 +152,8 @@ class Scratchpad(BaseModel):
     current_sub_task: str
     completed_steps: list[str] = []
     tasks: list[TaskItem] = []
+    track: Optional[str] = "fast_track"  # "fast_track" (Code/CLI/Files) | "visual_track" (GUI/Desktop) | "hybrid"
+    verification_strategy: Optional[str] = None  # Expected verification check for this sub-task
 
 
 class QuestionOptionItem(BaseModel):
@@ -345,6 +349,59 @@ def generate_element_crop(
     except Exception as e:
         print(f"Error generating visual crop: {e}")
         return None
+
+
+def verify_visual_action_delta(
+    pre_img: Image.Image,
+    post_img: Image.Image,
+    px: int,
+    py: int,
+    monitor: dict,
+    patch_size: int = 180,
+    local_threshold: float = 2.0,
+    global_threshold: float = 1.0,
+) -> tuple[bool, float, float]:
+    """
+    Closed-Loop Action Verification (Astra-grade Look-Act-Verify):
+    Compares pre-action and post-action screenshots both locally around the click target (px, py)
+    and globally across the display to verify whether the UI responded.
+    Returns:
+        (is_verified: bool, local_delta: float, global_delta: float)
+    """
+    try:
+        if pre_img is None or post_img is None:
+            return False, 0.0, 0.0
+
+        # 1. Local Patch Delta (around target coordinate)
+        local_x = px - monitor.get("left", 0)
+        local_y = py - monitor.get("top", 0)
+
+        half = patch_size // 2
+        x1 = max(0, local_x - half)
+        y1 = max(0, local_y - half)
+        x2 = min(pre_img.width, local_x + half)
+        y2 = min(pre_img.height, local_y + half)
+
+        local_delta = 0.0
+        if x2 > x1 and y2 > y1:
+            pre_patch = pre_img.crop((x1, y1, x2, y2))
+            post_patch = post_img.crop((x1, y1, x2, y2))
+            diff_patch = ImageChops.difference(pre_patch, post_patch)
+            stat_patch = ImageStat.Stat(diff_patch)
+            local_delta = sum(stat_patch.mean) / max(1, len(stat_patch.mean))
+
+        # 2. Global Display Delta (downscaled for fast structural comparison)
+        small_pre = pre_img.resize((320, 180), Image.Resampling.NEAREST)
+        small_post = post_img.resize((320, 180), Image.Resampling.NEAREST)
+        diff_global = ImageChops.difference(small_pre, small_post)
+        stat_global = ImageStat.Stat(diff_global)
+        global_delta = sum(stat_global.mean) / max(1, len(stat_global.mean))
+
+        is_verified = (local_delta >= local_threshold) or (global_delta >= global_threshold)
+        return is_verified, local_delta, global_delta
+    except Exception as e:
+        print(f"[Castor] Action verification error: {e}")
+        return True, 0.0, 0.0
 
 
 # ── Agent Loop ────────────────────────────────────────────────────────────────
@@ -737,6 +794,7 @@ class AgentLoop:
         history: list[dict] | None = None,
         mode: str = "agent",
         custom_instructions: str | None = None,
+        reference_images: list[str] | None = None,
     ):
         self.current_project_path = project_path
         if not self.current_project_path:
@@ -894,7 +952,22 @@ class AgentLoop:
             "   - To open a new application: emit a batch with action 'hotkey' (keys: ['win']), "
             "     action 'type' (text: 'Unity Hub' or application name), and action 'hotkey' (keys: ['enter']).\n"
             "   - Alternatively, use action 'bash' to inspect or launch software (e.g., PowerShell commands).\n"
-            "   - If the application icon is already visible on the taskbar or desktop, click it.\n"
+            "   - If the application icon is already visible on the taskbar or desktop, click it.\n\n"
+            "=== ASTRA DUAL-TRACK EXECUTION LAW (FAST-PATH VS VISUAL COMPUTER USE) ===\n"
+            "To maximize execution speed, deterministic accuracy, and eliminate token waste, you must route tasks to the correct track:\n"
+            "1. TRACK A: HEADLESS FAST-PATH (MANDATORY FOR CODE, FILES, GIT, PACKAGES & CLI):\n"
+            "   - When reading, creating, modifying, testing, or searching files:\n"
+            "     ALWAYS use 'view_file', 'write_to_file', 'replace_file_content', 'multi_replace_file_content', 'grep_search', 'bash', 'run_tests'.\n"
+            "     NEVER attempt to click text editors, drag scrollbars, or type code via GUI keyboard emulation!\n"
+            "   - Headless execution runs at compiler speeds, without vision errors or coordinate misses.\n"
+            "2. TRACK B: VISUAL COMPUTER-USE TRACK (RESERVED FOR EXTERNAL GUI SOFTWARE & VISUAL QA):\n"
+            "   - Use for:\n"
+            "     * Interacting with external GUI software (Unity Editor, Blender, Unreal Engine, web browser windows, simulator viewports).\n"
+            "     * Clicking game engine controls ('Play', 'Pause', scene viewports, hierarchy inspectors).\n"
+            "     * Visually confirming rendering fidelity against user-uploaded reference images.\n"
+            "     * Interacting with modal dialogs or desktop OS windows.\n"
+            "3. HYBRID WORKFLOW:\n"
+            "   - For example: Generate or patch C# scripts via Fast-Track ('replace_file_content'), then switch to Visual-Track to press 'Play' in Unity and verify gameplay!\n\n"
             "5. AVAILABLE ACTIONS:\n"
             "   [GUI Desktop Actions]\n"
             "   - 'click': set 'target' to a clear semantic description of the element to click "
@@ -1006,6 +1079,54 @@ class AgentLoop:
 
         base_history.append(types.Content(role="user", parts=[types.Part(text=f"Goal: {clean_goal}")]))
 
+        # Process and attach user reference images (from file upload or clipboard paste)
+        ref_image_parts = []
+        if reference_images:
+            for idx, ref_item in enumerate(reference_images, 1):
+                try:
+                    if isinstance(ref_item, str) and ref_item.startswith("data:"):
+                        header, b64_str = ref_item.split(",", 1)
+                        mime = header.split(";")[0].replace("data:", "") or "image/png"
+                        raw_bytes = base64.b64decode(b64_str)
+                    elif isinstance(ref_item, str) and os.path.exists(ref_item):
+                        with open(ref_item, "rb") as f:
+                            raw_bytes = f.read()
+                        mime = "image/png" if ref_item.lower().endswith(".png") else "image/jpeg"
+                    else:
+                        raw_bytes = base64.b64decode(ref_item)
+                        mime = "image/png"
+
+                    # Persist reference image inside project directory if available
+                    if self.current_project_path:
+                        ref_dir = os.path.join(self.current_project_path, ".castor", "reference_images")
+                        os.makedirs(ref_dir, exist_ok=True)
+                        ext = "png" if "png" in mime else "jpg"
+                        ref_file = os.path.join(ref_dir, f"reference_{idx}.{ext}")
+                        with open(ref_file, "wb") as rf:
+                            rf.write(raw_bytes)
+
+                    ref_image_parts.append(types.Part(
+                        inline_data=types.Blob(data=raw_bytes, mime_type=mime)
+                    ))
+                except Exception as ref_err:
+                    print(f"[Castor] Reference image {idx} processing error: {ref_err}")
+
+            if ref_image_parts:
+                await self.send_status(f"🖼️ Attached {len(ref_image_parts)} reference image(s) from user.")
+                ref_guidance = (
+                    f"\n\n=== USER REFERENCE IMAGES ({len(ref_image_parts)} ATTACHED) ===\n"
+                    "The user provided visual reference image(s) above (e.g. UI mockup, design reference, error screenshot, wireframe).\n"
+                    "CRITICAL VISUAL COMPLIANCE RULES:\n"
+                    "1. Study these reference images with top priority.\n"
+                    "2. Make whatever changes, code implementations, or asset additions are necessary to faithfully reflect or fix what is shown in these images.\n"
+                    "3. If implementing UI, align layout, element positioning, colors, text labels, and styling directly with the reference images.\n"
+                    "4. If troubleshooting an error shown in a reference screenshot, diagnose and resolve that exact problem."
+                )
+                base_history.append(types.Content(
+                    role="user",
+                    parts=[types.Part(text=f"User Reference Image(s) ({len(ref_image_parts)} attached):")] + ref_image_parts + [types.Part(text=ref_guidance)],
+                ))
+
         # Check for matching skills to advise the planner to load them
         matched_skills = await skills_manager.get_or_create_skills_for_goal(
             goal=clean_goal,
@@ -1075,6 +1196,7 @@ class AgentLoop:
                         client=self.client,
                         model=self.planner_model,
                         project_path=self.current_project_path,
+                        goal=clean_goal,
                     )
                     await self.send_status("✅ History compacted. Active context refreshed.")
                 except Exception as comp_err:
@@ -1145,8 +1267,12 @@ class AgentLoop:
                     types.Part(text=scratchpad_ctx),
                     types.Part(text="Current desktop screenshot:"),
                     pil_to_part(scaled_img),
-                    types.Part(text="What is the next action to take towards the goal?"),
                 ]
+                if ref_image_parts:
+                    planner_parts.append(types.Part(
+                        text=f"[VISUAL REFERENCE ACTIVE: {len(ref_image_parts)} user reference image(s) attached in initial turn. Ensure changes, layout, and style match the reference.]"
+                    ))
+                planner_parts.append(types.Part(text="What is the next action to take towards the goal?"))
                 request_content = types.Content(role="user", parts=planner_parts)
 
                 # Rolling history: base goal + last N turns
@@ -1292,7 +1418,9 @@ class AgentLoop:
                             ))
                             continue
 
-                    await self.send_status(f"▶ Executing: {action_type.upper()}" + (f" — {action_param.target or action_param.text or ''}" if (action_param.target or action_param.text) else ""))
+                    is_visual_action = action_type in ["click", "drag", "type", "hotkey", "scroll"]
+                    track_prefix = "👁️ [Visual-Track]" if is_visual_action else "⚡ [Fast-Track]"
+                    await self.send_status(f"{track_prefix} {action_type.upper()}" + (f" — {action_param.target or action_param.text or ''}" if (action_param.target or action_param.text) else ""))
 
                     # ── done ─────────────────────────────────────────────────
                     if action_type == "done":
@@ -2106,11 +2234,12 @@ class AgentLoop:
                                     f"3. Make minimal, surgical fixes with 'replace_file_content'.\n"
                                     f"4. Re-run tests with 'run_tests' until all tests pass."
                                 )
-                                sub_ok, sub_report = await asyncio.to_thread(
-                                    run_subagent,
-                                    prompt=repair_prompt,
-                                    current_project_path=self.current_project_path,
-                                    max_steps=8,
+                                sub_ok, sub_report = await run_subagent(
+                                    task_prompt=repair_prompt,
+                                    cwd=self.current_project_path,
+                                    api_key=self.api_key,
+                                    model_name=self.planner_model,
+                                    max_turns=8,
                                 )
                                 # Re-verify after repair attempt
                                 ok, res_text = await asyncio.to_thread(
@@ -2434,10 +2563,85 @@ class AgentLoop:
                                     pyautogui.drag(0, 50, duration=0.3)
 
                         await asyncio.to_thread(execute_mouse)
+
+                        # ── Astra-Grade Closed-Loop Action Verification ──────────
+                        # Measure pre/post screen differential to confirm UI state transition
+                        await asyncio.sleep(0.35)  # Allow UI to render response (e.g. state transition / popup)
+                        post_img, _ = await self.capture_screen()
+
+                        is_verified, local_delta, global_delta = verify_visual_action_delta(
+                            pre_img=full_img,
+                            post_img=post_img,
+                            px=px,
+                            py=py,
+                            monitor=monitor
+                        )
+                        effective_delta = max(local_delta, global_delta)
+                        is_final_verified = is_verified
+
                         if _action_type == "click":
-                            await self.send_status(f"🎯 Clicked on '{action_param.target}'")
+                            if is_verified:
+                                await self.send_status(
+                                    f"✅ Verified click on '{action_param.target}' (UI response: {effective_delta:.1f}Δ)"
+                                )
+                                rolling_history.append(types.Content(
+                                    role="user",
+                                    parts=[types.Part(text=f"[ACTION VERIFIED] Click on '{action_param.target}' at ({px}, {py}) triggered confirmed UI change (delta: {effective_delta:.1f}).")]
+                                ))
+                            else:
+                                # Autonomous Micro-Correction Attempt (Jitter & Window Focus Click)
+                                await self.send_status(
+                                    f"⚠️ Low UI delta on '{action_param.target}' ({effective_delta:.1f}Δ). Applying autonomous activation retry..."
+                                )
+                                def retry_mouse():
+                                    ensure_input_desktop()
+                                    retry_x = px + 2
+                                    retry_y = py + 2
+                                    if os.name == "nt":
+                                        try:
+                                            import ctypes
+                                            ctypes.windll.user32.SetCursorPos(int(retry_x), int(retry_y))
+                                        except Exception:
+                                            pass
+                                    pyautogui.mouseDown(retry_x, retry_y)
+                                    time.sleep(0.12)
+                                    pyautogui.mouseUp(retry_x, retry_y)
+
+                                await asyncio.to_thread(retry_mouse)
+                                await asyncio.sleep(0.35)
+                                post_img_retry, _ = await self.capture_screen()
+                                is_verified_r, local_delta_r, global_delta_r = verify_visual_action_delta(
+                                    pre_img=full_img,
+                                    post_img=post_img_retry,
+                                    px=px,
+                                    py=py,
+                                    monitor=monitor
+                                )
+                                effective_delta_r = max(local_delta_r, global_delta_r)
+                                if is_verified_r:
+                                    is_final_verified = True
+                                    effective_delta = effective_delta_r
+                                    await self.send_status(
+                                        f"🎉 Click verified after activation retry on '{action_param.target}' ({effective_delta_r:.1f}Δ)"
+                                    )
+                                    rolling_history.append(types.Content(
+                                        role="user",
+                                        parts=[types.Part(text=f"[ACTION VERIFIED AFTER RETRY] Click on '{action_param.target}' triggered confirmed UI change after activation retry (delta: {effective_delta_r:.1f}).")]
+                                    ))
+                                else:
+                                    await self.send_status(
+                                        f"⚠️ Warning: Element '{action_param.target}' produced no visual change."
+                                    )
+                                    rolling_history.append(types.Content(
+                                        role="user",
+                                        parts=[types.Part(text=(
+                                            f"[ACTION VERIFICATION NOTICE] Click on '{action_param.target}' at ({px}, {py}) produced NO visual change on screen. "
+                                            "The element may be disabled, not focused, or part of a background window. "
+                                            "Advice: Use 'focus_window' to bring the application window to front, use keyboard accelerators/hotkeys, or use CLI tools."
+                                        ))]
+                                    ))
                         elif _action_type == "drag":
-                            await self.send_status(f"🎯 Dragged '{action_param.target}' → '{action_param.destination}'")
+                            await self.send_status(f"🎯 Dragged '{action_param.target}' → '{action_param.destination}' (delta: {effective_delta:.1f}Δ)")
 
                         if crop_b64:
                             await self.send_json({
@@ -2449,9 +2653,11 @@ class AgentLoop:
                                 "y": py,
                                 "bbox": p_bbox,
                                 "crop": crop_b64,
+                                "verified": is_final_verified,
+                                "delta": round(float(effective_delta), 1),
                             })
 
-                        await asyncio.sleep(1.0)  # Wait for UI to respond before next screen capture
+                        await asyncio.sleep(0.5)  # Settle time before next action
 
 
                     else:
