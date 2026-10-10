@@ -1144,6 +1144,14 @@ function getBackoffDelay(attempt) {
 
 function ChatWindow() {
   const [goal, setGoal] = useState('');
+  const [permissionMode, setPermissionMode] = useState(() => {
+    try {
+      return localStorage.getItem('castor_permission_mode') || 'guarded';
+    } catch {
+      return 'guarded';
+    }
+  });
+  const [isPermissionMenuOpen, setIsPermissionMenuOpen] = useState(false);
   const [hitlEnabled, setHitlEnabled] = useState(false);
   const [hitlRequest, setHitlRequest] = useState(null);
   const [questionModal, setQuestionModal] = useState(null);
@@ -2659,7 +2667,8 @@ function ChatWindow() {
       JSON.stringify({
         action: 'start_goal',
         goal: goalText,
-        hitl_enabled: hitlEnabled,
+        hitl_enabled: permissionMode === 'strict' || hitlEnabled,
+        permission_mode: permissionMode,
         project_path: activeProject?.path || null,
         history: priorHistory,
         mode: effectiveMode,
@@ -2726,6 +2735,15 @@ function ChatWindow() {
         },
       }));
     }
+  };
+
+  const handleSelectPermissionMode = (mode) => {
+    setPermissionMode(mode);
+    setHitlEnabled(mode === 'strict');
+    try {
+      localStorage.setItem('castor_permission_mode', mode);
+    } catch {}
+    setIsPermissionMenuOpen(false);
   };
 
   const abortGoal = () => {
@@ -3688,23 +3706,81 @@ function ChatWindow() {
               </div>
             )}
 
-            {/* HitL Request Inject */}
+            {/* HitL & Guardrail Request Inject */}
             {hitlRequest && (
-              <div className="flex justify-start max-w-3xl mt-4">
-                <div className="w-8 h-8 rounded-full bg-orange-900/50 border border-orange-800 flex items-center justify-center mr-3 mt-1 flex-shrink-0 text-xs text-orange-400 font-bold">
-                  !
+              <div className="flex justify-start max-w-3xl mt-4 animate-in fade-in duration-200">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center mr-3 mt-1 flex-shrink-0 text-sm font-bold shadow-md border ${
+                  hitlRequest.severity === 'critical'
+                    ? 'bg-red-950 text-red-400 border-red-700 animate-pulse'
+                    : hitlRequest.severity === 'high'
+                    ? 'bg-amber-950 text-amber-400 border-amber-700'
+                    : 'bg-blue-950 text-blue-400 border-blue-700'
+                }`}>
+                  {hitlRequest.severity === 'critical' ? '🚨' : hitlRequest.severity === 'high' ? '🔒' : '✋'}
                 </div>
-                <div className="flex-1 bg-[#18181b] border border-orange-900/50 rounded-xl p-4 shadow-xl">
-                  <h3 className="text-sm font-medium text-orange-400 mb-1">Approval Required</h3>
-                  <p className="text-zinc-300 text-sm mb-3 bg-zinc-900 p-2 rounded border border-zinc-800 font-mono">
-                    {hitlRequest.action}
-                  </p>
+                <div className={`flex-1 bg-[#14151b] rounded-2xl p-4 shadow-2xl border space-y-3 ${
+                  hitlRequest.severity === 'critical'
+                    ? 'border-red-900/60 ring-1 ring-red-500/20'
+                    : hitlRequest.severity === 'high'
+                    ? 'border-amber-900/60 ring-1 ring-amber-500/20'
+                    : 'border-blue-900/50 ring-1 ring-blue-500/20'
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs uppercase font-bold tracking-wider px-2 py-0.5 rounded-full border ${
+                        hitlRequest.severity === 'critical'
+                          ? 'bg-red-500/20 text-red-300 border-red-500/40'
+                          : hitlRequest.severity === 'high'
+                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                          : 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                      }`}>
+                        {hitlRequest.severity === 'critical'
+                          ? '🚨 Critical Safety Interception'
+                          : hitlRequest.severity === 'high'
+                          ? '🔒 Sensitive Path Approval'
+                          : '✋ User Confirmation Required'}
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-mono text-zinc-500">Security Guardrail Active</span>
+                  </div>
+
+                  {hitlRequest.reason && (
+                    <div className="text-xs text-amber-200 bg-amber-950/30 p-2.5 rounded-xl border border-amber-800/40 leading-relaxed">
+                      <span className="font-semibold text-amber-300">Policy Reason:</span> {hitlRequest.reason}
+                    </div>
+                  )}
+
+                  <div>
+                    <div className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 mb-1">Target Action</div>
+                    <p className="text-zinc-200 text-xs bg-zinc-950 p-2.5 rounded-xl border border-zinc-800 font-mono leading-relaxed break-all">
+                      {hitlRequest.action}
+                    </p>
+                  </div>
+
+                  {hitlRequest.preview && (
+                    <div>
+                      <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-zinc-400 mb-1">
+                        <span>Payload / Command Preview</span>
+                        <button
+                          type="button"
+                          onClick={() => navigator.clipboard.writeText(hitlRequest.preview)}
+                          className="hover:text-zinc-200 text-zinc-500 transition-colors"
+                        >
+                          Copy
+                        </button>
+                      </div>
+                      <pre className="text-zinc-300 text-xs bg-zinc-950 p-2.5 rounded-xl border border-zinc-800 font-mono overflow-x-auto max-h-40 leading-relaxed">
+                        <code>{hitlRequest.preview}</code>
+                      </pre>
+                    </div>
+                  )}
+
                   {hitlRequest.crop && (
-                    <div className="mb-3.5 flex items-center gap-3 bg-zinc-950 p-2.5 rounded-lg border border-zinc-800">
+                    <div className="flex items-center gap-3 bg-zinc-950 p-2.5 rounded-xl border border-zinc-800">
                       <img
                         src={hitlRequest.crop}
                         alt="Target crop"
-                        className="w-20 h-20 object-contain rounded border border-zinc-700 bg-black/60 shadow shrink-0 cursor-pointer hover:scale-105 transition-transform"
+                        className="w-20 h-20 object-contain rounded-lg border border-zinc-700 bg-black/60 shadow shrink-0 cursor-pointer hover:scale-105 transition-transform"
                         onClick={() => setSelectedCropModal({ crop: hitlRequest.crop, target: hitlRequest.action, x: hitlRequest.x, y: hitlRequest.y, bbox: hitlRequest.bbox })}
                         title="Click to zoom element preview"
                       />
@@ -3720,18 +3796,23 @@ function ChatWindow() {
                       </div>
                     </div>
                   )}
-                  <div className="flex gap-3">
+
+                  <div className="flex gap-3 pt-1">
                     <button
+                      type="button"
                       onClick={approveAction}
-                      className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 py-2 rounded-lg text-sm font-medium transition-colors border border-zinc-700"
+                      className="flex-1 bg-emerald-700 hover:bg-emerald-600 text-white py-2 rounded-xl text-xs font-semibold transition-all shadow-md flex items-center justify-center gap-1.5"
                     >
-                      Approve
+                      <span>✓</span>
+                      <span>Approve &amp; Execute</span>
                     </button>
                     <button
+                      type="button"
                       onClick={rejectAction}
-                      className="flex-1 bg-red-900/40 hover:bg-red-900/60 text-red-400 py-2 rounded-lg text-sm font-medium transition-colors border border-red-900/50"
+                      className="flex-1 bg-red-900/40 hover:bg-red-900/70 text-red-300 py-2 rounded-xl text-xs font-semibold transition-all border border-red-900/60 flex items-center justify-center gap-1.5"
                     >
-                      Reject & Abort
+                      <span>✕</span>
+                      <span>Reject &amp; Abort</span>
                     </button>
                   </div>
                 </div>
@@ -4269,22 +4350,119 @@ function ChatWindow() {
                     )}
                   </div>
 
-                  <label className="flex items-center gap-2 cursor-pointer group select-none">
-                    <div className="relative flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={hitlEnabled}
-                        onChange={(e) => setHitlEnabled(e.target.checked)}
-                        className="sr-only"
-                      />
-                      <div className={`w-8 h-4.5 rounded-full transition-colors flex items-center ${hitlEnabled ? 'bg-blue-600' : 'bg-zinc-700'}`}>
-                        <div className={`w-3.5 h-3.5 rounded-full bg-white shadow-sm transform transition-transform ml-0.5 ${hitlEnabled ? 'translate-x-3.5' : ''}`} />
+                  {/* ── Phase 11: Fine-Grained Permission Guardrails & Dry-Run Selector ── */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setIsPermissionMenuOpen((prev) => !prev)}
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all border ${
+                        permissionMode === 'dry_run'
+                          ? 'bg-amber-950/40 border-amber-600/50 text-amber-300 hover:bg-amber-900/50'
+                          : permissionMode === 'strict'
+                          ? 'bg-blue-950/40 border-blue-600/50 text-blue-300 hover:bg-blue-900/50'
+                          : permissionMode === 'autonomous'
+                          ? 'bg-purple-950/40 border-purple-600/50 text-purple-300 hover:bg-purple-900/50'
+                          : 'bg-zinc-800/80 border-emerald-700/50 text-emerald-300 hover:bg-zinc-800'
+                      }`}
+                      title="Fine-Grained Security Policy & Dry-Run Mode"
+                    >
+                      <span>
+                        {permissionMode === 'dry_run' ? '🧪' : permissionMode === 'strict' ? '✋' : permissionMode === 'autonomous' ? '⚡' : '🛡️'}
+                      </span>
+                      <span>
+                        {permissionMode === 'dry_run'
+                          ? 'Dry-Run'
+                          : permissionMode === 'strict'
+                          ? 'Interactive HITL'
+                          : permissionMode === 'autonomous'
+                          ? 'Autonomous'
+                          : 'Guarded'}
+                      </span>
+                      <svg className="w-3 h-3 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+
+                    {isPermissionMenuOpen && (
+                      <div className="absolute bottom-full left-0 mb-2 w-72 bg-[#12131a] border border-zinc-800 rounded-xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in duration-150">
+                        <div className="px-2 py-1 text-[10px] font-mono uppercase tracking-wider text-zinc-500 border-b border-zinc-800/60 pb-1.5 flex items-center justify-between">
+                          <span>Security Policy &amp; Guardrails</span>
+                          <span className="text-[9px] text-zinc-400">Phase 11</span>
+                        </div>
+
+                        {/* Guarded (Default) */}
+                        <button
+                          type="button"
+                          onClick={() => handleSelectPermissionMode('guarded')}
+                          className={`w-full text-left p-2 rounded-lg transition-colors flex items-start gap-2.5 ${
+                            permissionMode === 'guarded' ? 'bg-emerald-950/40 border border-emerald-700/50' : 'hover:bg-zinc-800/60'
+                          }`}
+                        >
+                          <span className="text-base mt-0.5">🛡️</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-semibold text-emerald-300 flex items-center justify-between">
+                              <span>Guarded Mode</span>
+                              <span className="text-[9px] font-mono bg-emerald-900/60 text-emerald-300 px-1 rounded">Recommended</span>
+                            </div>
+                            <p className="text-[11px] text-zinc-400 mt-0.5 leading-snug">
+                              Safe edits auto-run. Prompts for destructive commands &amp; sensitive paths (.env).
+                            </p>
+                          </div>
+                        </button>
+
+                        {/* Action Dry Run */}
+                        <button
+                          type="button"
+                          onClick={() => handleSelectPermissionMode('dry_run')}
+                          className={`w-full text-left p-2 rounded-lg transition-colors flex items-start gap-2.5 ${
+                            permissionMode === 'dry_run' ? 'bg-amber-950/40 border border-amber-600/50' : 'hover:bg-zinc-800/60'
+                          }`}
+                        >
+                          <span className="text-base mt-0.5">🧪</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-semibold text-amber-300">Action Dry-Run</div>
+                            <p className="text-[11px] text-zinc-400 mt-0.5 leading-snug">
+                              Simulates all actions, diffs, and plans with zero disk or system modifications.
+                            </p>
+                          </div>
+                        </button>
+
+                        {/* Interactive HITL */}
+                        <button
+                          type="button"
+                          onClick={() => handleSelectPermissionMode('strict')}
+                          className={`w-full text-left p-2 rounded-lg transition-colors flex items-start gap-2.5 ${
+                            permissionMode === 'strict' ? 'bg-blue-950/40 border border-blue-600/50' : 'hover:bg-zinc-800/60'
+                          }`}
+                        >
+                          <span className="text-base mt-0.5">✋</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-semibold text-blue-300">Interactive HITL</div>
+                            <p className="text-[11px] text-zinc-400 mt-0.5 leading-snug">
+                              Prompts for explicit confirmation before every state-modifying action.
+                            </p>
+                          </div>
+                        </button>
+
+                        {/* Full Autonomous */}
+                        <button
+                          type="button"
+                          onClick={() => handleSelectPermissionMode('autonomous')}
+                          className={`w-full text-left p-2 rounded-lg transition-colors flex items-start gap-2.5 ${
+                            permissionMode === 'autonomous' ? 'bg-purple-950/40 border border-purple-600/50' : 'hover:bg-zinc-800/60'
+                          }`}
+                        >
+                          <span className="text-base mt-0.5">⚡</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-semibold text-purple-300">Full Autonomous</div>
+                            <p className="text-[11px] text-zinc-400 mt-0.5 leading-snug">
+                              Runs without interactive confirmation prompts (with security audit logs).
+                            </p>
+                          </div>
+                        </button>
                       </div>
-                    </div>
-                    <span className="text-xs font-medium text-zinc-400 group-hover:text-zinc-300 transition-colors">
-                      Human in the loop
-                    </span>
-                  </label>
+                    )}
+                  </div>
 
                   {isAgentRunning && (
                     <button

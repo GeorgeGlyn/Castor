@@ -12,6 +12,7 @@ try:
     from .ast_indexer import ast_indexer
     from .checkpoint_manager import checkpoint_manager
     from .diagnostic_engine import diagnostic_engine
+    from .guardrail_manager import guardrail_manager
 except ImportError:
     from agent import AgentLoop, get_monitors_info
     from artifacts_manager import artifacts_manager
@@ -20,6 +21,7 @@ except ImportError:
     from ast_indexer import ast_indexer
     from checkpoint_manager import checkpoint_manager
     from diagnostic_engine import diagnostic_engine
+    from guardrail_manager import guardrail_manager
 
 router = APIRouter()
 
@@ -246,6 +248,33 @@ async def sandbox_bundle(req: SandboxBundleRequest):
         "type": eff_type,
         "html": bundled_html
     }
+
+class GuardrailCheckRequest(BaseModel):
+    command: Optional[str] = None
+    path: Optional[str] = None
+    action_type: Optional[str] = "bash"
+    permission_mode: Optional[str] = "guarded"
+    project_path: Optional[str] = None
+
+@router.post("/api/guardrails/check")
+async def check_guardrails_endpoint(req: GuardrailCheckRequest):
+    if req.command:
+        is_destr, reason, sev = guardrail_manager.check_command_safety(req.command)
+        return {
+            "safe": not is_destr,
+            "is_destructive": is_destr,
+            "severity": sev,
+            "reason": reason,
+        }
+    elif req.path:
+        is_sens, reason, sev = guardrail_manager.check_path_sensitivity(req.path, req.project_path)
+        return {
+            "safe": not is_sens,
+            "is_sensitive": is_sens,
+            "severity": sev,
+            "reason": reason,
+        }
+    return {"safe": True, "is_destructive": False, "is_sensitive": False, "severity": "low", "reason": ""}
  
 @router.get("/api/providers")
 async def list_providers():
@@ -531,6 +560,9 @@ async def websocket_endpoint(websocket: WebSocket):
             if action == "start_goal":
                 goal = data.get("goal")
                 hitl_enabled = data.get("hitl_enabled", False)
+                permission_mode = data.get("permission_mode")
+                if not permission_mode:
+                    permission_mode = "strict" if hitl_enabled else "guarded"
                 project_path = data.get("project_path")
                 history = data.get("history", [])
                 mode = data.get("mode", "agent")
@@ -547,6 +579,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                 mode=mode,
                                 custom_instructions=custom_instructions,
                                 reference_images=reference_images,
+                                permission_mode=permission_mode,
                             )
                         except Exception as e:
                             import traceback

@@ -26,6 +26,7 @@ try:
     from .model_manager import model_manager
     from .ast_indexer import ast_indexer
     from .diagnostic_engine import diagnostic_engine
+    from .guardrail_manager import guardrail_manager
 except ImportError:
     import skills_manager
     import dev_tools
@@ -40,6 +41,7 @@ except ImportError:
     from model_manager import model_manager
     from ast_indexer import ast_indexer
     from diagnostic_engine import diagnostic_engine
+    from guardrail_manager import guardrail_manager
 from fastapi import WebSocket
 from google import genai
 from google.genai import types
@@ -773,7 +775,7 @@ class AgentLoop:
             print(f"[Castor] Grounder exception: {e}")
             return None
 
-    # ── HitL gate ─────────────────────────────────────────────────────────────
+    # ── HitL & Guardrail gate ─────────────────────────────────────────────────
 
     async def request_hitl_approval(
         self,
@@ -783,6 +785,10 @@ class AgentLoop:
         bbox: list | None = None,
         is_micro: bool = False,
         crop: str | None = None,
+        severity: str = "medium",
+        category: str = "hitl",
+        reason: str = "",
+        preview: str | None = None,
     ) -> bool:
         """Send a HITL request and wait for the user's decision. Returns True if approved."""
         self.hitl_approved = False
@@ -794,12 +800,58 @@ class AgentLoop:
             "y": py,
             "bbox": bbox or [0, 0, 0, 0],
             "is_micro_target": is_micro,
+            "severity": severity,
+            "category": category,
+            "reason": reason,
+            "preview": preview,
         }
         if crop:
             payload["crop"] = crop
         await self.websocket.send_json(payload)
         await self.hitl_approval_event.wait()
         return self.is_running and self.hitl_approved
+
+    async def check_action_guardrails(
+        self,
+        action_type: str,
+        action_param: Any,
+        permission_mode: str = "guarded",
+        px: int = 0,
+        py: int = 0,
+        bbox: list | None = None,
+        is_micro: bool = False,
+        crop: str | None = None,
+    ) -> tuple[bool, bool]:
+        """
+        Evaluate guardrails for an action against current security policy.
+        Returns: (proceed: bool, is_simulated_dry_run: bool)
+        """
+        decision = guardrail_manager.evaluate(
+            action_type=action_type,
+            param=action_param,
+            permission_mode=permission_mode,
+            workspace_path=self.current_project_path,
+        )
+
+        if decision.is_dry_run:
+            return True, True
+
+        if decision.requires_approval:
+            approved = await self.request_hitl_approval(
+                action_label=decision.action_label,
+                px=px,
+                py=py,
+                bbox=bbox,
+                is_micro=is_micro,
+                crop=crop,
+                severity=decision.severity,
+                category=decision.category,
+                reason=decision.reason,
+                preview=decision.preview,
+            )
+            return approved, False
+
+        return True, False
 
     # ── Main loop ─────────────────────────────────────────────────────────────
 
@@ -812,6 +864,7 @@ class AgentLoop:
         mode: str = "agent",
         custom_instructions: str | None = None,
         reference_images: list[str] | None = None,
+        permission_mode: str = "guarded",
     ):
         self.current_project_path = project_path
         if not self.current_project_path:
@@ -852,6 +905,20 @@ class AgentLoop:
 
         # Normalize execution mode
         active_mode = (mode or "agent").strip().lower()
+
+        # Resolve effective permission guardrail policy
+        eff_permission = (permission_mode or "guarded").strip().lower()
+        if hitl_enabled and eff_permission == "guarded":
+            eff_permission = "strict"
+
+        if eff_permission == "dry_run":
+            await self.send_status("🧪 Security Policy: DRY-RUN SIMULATION (Zero modifications will be committed to disk or processes)")
+        elif eff_permission == "strict":
+            await self.send_status("✋ Security Policy: INTERACTIVE HITL (Approval required for state-modifying actions)")
+        elif eff_permission == "autonomous":
+            await self.send_status("⚡ Security Policy: FULL AUTONOMOUS (Unrestricted execution with active security logging)")
+        else:
+            await self.send_status("🛡️ Security Policy: SMART GUARDED (Safe edits auto-run; destructive commands & sensitive paths gated)")
 
         if clean_goal.startswith("/learn"):
             learn_text = clean_goal.replace("/learn", "", 1).strip()
@@ -1614,10 +1681,17 @@ class AgentLoop:
                             ))
                             continue
 
-                        if hitl_enabled:
-                            approved = await self.request_hitl_approval(f"BASH: {cmd}")
-                            if not approved:
-                                break
+                        proceed, is_dry = await self.check_action_guardrails("bash", action_param, eff_permission)
+                        if not proceed:
+                            await self.send_status(f"🛑 Bash command rejected by user: {cmd[:60]}")
+                            break
+                        if is_dry:
+                            await self.send_status(f"🧪 [SIMULATED DRY-RUN] Would execute shell command: {cmd}")
+                            rolling_history.append(types.Content(
+                                role="user",
+                                parts=[types.Part(text=f"[SIMULATED DRY-RUN BASH]\nCommand: {cmd}\nStatus: Simulated (command was NOT run on host)")],
+                            ))
+                            continue
 
                         if action_param.is_background:
                             await self.send_status(f"⚙️ Launching background task: {cmd}")
@@ -1770,10 +1844,17 @@ class AgentLoop:
                         if not f_path:
                             await self.send_status("⚠️ write_to_file has no path specified.")
                             continue
-                        if hitl_enabled:
-                            approved = await self.request_hitl_approval(f"WRITE_FILE: {f_path} ({len(content)} bytes)")
-                            if not approved:
-                                break
+                        proceed, is_dry = await self.check_action_guardrails("write_file", action_param, eff_permission)
+                        if not proceed:
+                            await self.send_status(f"🛑 File write rejected by user: {f_path}")
+                            break
+                        if is_dry:
+                            await self.send_status(f"🧪 [SIMULATED DRY-RUN] Would write {len(content)} bytes to: {f_path}")
+                            rolling_history.append(types.Content(
+                                role="user",
+                                parts=[types.Part(text=f"[SIMULATED DRY-RUN WRITE_TO_FILE]\nTarget: {f_path}\nBytes: {len(content)}\nStatus: Simulated (file was NOT written to disk)")],
+                            ))
+                            continue
                         await self.send_status(f"📝 Writing file: {f_path}")
                         ok, res_text = await asyncio.to_thread(
                             dev_tools.write_to_file,
@@ -1814,10 +1895,17 @@ class AgentLoop:
                         if not f_path or not old_text:
                             await self.send_status("⚠️ replace_file_content requires both 'path' and 'old_text'.")
                             continue
-                        if hitl_enabled:
-                            approved = await self.request_hitl_approval(f"REPLACE_CONTENT: {f_path}")
-                            if not approved:
-                                break
+                        proceed, is_dry = await self.check_action_guardrails("replace_file_content", action_param, eff_permission)
+                        if not proceed:
+                            await self.send_status(f"🛑 File edit rejected by user: {f_path}")
+                            break
+                        if is_dry:
+                            await self.send_status(f"🧪 [SIMULATED DRY-RUN] Would edit file: {f_path}")
+                            rolling_history.append(types.Content(
+                                role="user",
+                                parts=[types.Part(text=f"[SIMULATED DRY-RUN REPLACE_FILE_CONTENT]\nTarget: {f_path}\nStatus: Simulated (file was NOT modified on disk)")],
+                            ))
+                            continue
                         await self.send_status(f"✏️ Editing file: {f_path}")
                         ok, res_text = await asyncio.to_thread(
                             dev_tools.replace_file_content,
@@ -1906,10 +1994,17 @@ class AgentLoop:
                         if not f_path or not replacements_data:
                             await self.send_status("⚠️ multi_replace_file_content requires 'path' and 'replacements' list.")
                             continue
-                        if hitl_enabled:
-                            approved = await self.request_hitl_approval(f"MULTI_REPLACE: {f_path} ({len(replacements_data)} chunks)")
-                            if not approved:
-                                break
+                        proceed, is_dry = await self.check_action_guardrails("multi_replace_file_content", action_param, eff_permission)
+                        if not proceed:
+                            await self.send_status(f"🛑 Multi-edit rejected by user: {f_path}")
+                            break
+                        if is_dry:
+                            await self.send_status(f"🧪 [SIMULATED DRY-RUN] Would multi-edit {len(replacements_data)} chunks in: {f_path}")
+                            rolling_history.append(types.Content(
+                                role="user",
+                                parts=[types.Part(text=f"[SIMULATED DRY-RUN MULTI_REPLACE_FILE_CONTENT]\nTarget: {f_path}\nChunks: {len(replacements_data)}\nStatus: Simulated (file was NOT modified on disk)")],
+                            ))
+                            continue
                         await self.send_status(f"✏️ Multi-editing file: {f_path} ({len(replacements_data)} chunks)")
                         ok, res_text = await asyncio.to_thread(
                             dev_tools.multi_replace_file_content,
@@ -2324,10 +2419,17 @@ class AgentLoop:
                     # ── restore_checkpoint ───────────────────────────────────
                     elif action_type == "restore_checkpoint":
                         cp_id = action_param.checkpoint_id or action_param.target or action_param.text or "latest"
-                        if hitl_enabled:
-                            approved = await self.request_hitl_approval(f"RESTORE_CHECKPOINT: {cp_id}")
-                            if not approved:
-                                break
+                        proceed, is_dry = await self.check_action_guardrails("restore_checkpoint", action_param, eff_permission)
+                        if not proceed:
+                            await self.send_status(f"🛑 Rollback rejected by user: {cp_id}")
+                            break
+                        if is_dry:
+                            await self.send_status(f"🧪 [SIMULATED DRY-RUN] Would rollback to checkpoint: {cp_id}")
+                            rolling_history.append(types.Content(
+                                role="user",
+                                parts=[types.Part(text=f"[SIMULATED DRY-RUN RESTORE_CHECKPOINT]\nCheckpoint: {cp_id}\nStatus: Simulated (workspace not reverted)")],
+                            ))
+                            continue
                         await self.send_status(f"⏪ Rolling back workspace to checkpoint: {cp_id}...")
                         ok, res_text = await asyncio.to_thread(
                             checkpoint_manager.restore_checkpoint,
@@ -2611,10 +2713,13 @@ class AgentLoop:
                         if not action_param.text:
                             continue
 
-                        if hitl_enabled:
-                            approved = await self.request_hitl_approval(f"TYPE: {action_param.text[:80]}")
-                            if not approved:
-                                break
+                        proceed, is_dry = await self.check_action_guardrails("type", action_param, eff_permission)
+                        if not proceed:
+                            await self.send_status("🛑 Typing rejected by user")
+                            break
+                        if is_dry:
+                            await self.send_status(f"🧪 [SIMULATED DRY-RUN] Would type: {action_param.text[:60]}")
+                            continue
 
                         def do_type():
                             ensure_input_desktop()
@@ -2637,10 +2742,13 @@ class AgentLoop:
                         if not action_param.keys:
                             continue
 
-                        if hitl_enabled:
-                            approved = await self.request_hitl_approval(f"HOTKEY: {'+'.join(action_param.keys)}")
-                            if not approved:
-                                break
+                        proceed, is_dry = await self.check_action_guardrails("press_hotkey", action_param, eff_permission)
+                        if not proceed:
+                            await self.send_status("🛑 Hotkey rejected by user")
+                            break
+                        if is_dry:
+                            await self.send_status(f"🧪 [SIMULATED DRY-RUN] Would press hotkey: {'+'.join(action_param.keys)}")
+                            continue
 
                         keys = action_param.keys
 
@@ -2752,15 +2860,22 @@ class AgentLoop:
                                 if d_data and d_data.get("px", -1) >= 0 and d_data.get("py", -1) >= 0:
                                     dest_px, dest_py = d_data["px"], d_data["py"]
 
-                        if hitl_enabled:
-                            label = f"{action_type.upper()}: {action_param.target}"
-                            if action_type == "drag" and action_param.destination:
-                                label += f" → {action_param.destination}"
-                            approved = await self.request_hitl_approval(
-                                label, px=px, py=py, bbox=p_bbox, is_micro=is_micro, crop=crop_b64
-                            )
-                            if not approved:
-                                break
+                        proceed, is_dry = await self.check_action_guardrails(
+                            action_type,
+                            action_param,
+                            eff_permission,
+                            px=px,
+                            py=py,
+                            bbox=p_bbox,
+                            is_micro=is_micro,
+                            crop=crop_b64,
+                        )
+                        if not proceed:
+                            await self.send_status(f"🛑 Mouse action rejected by user: {action_type}")
+                            break
+                        if is_dry:
+                            await self.send_status(f"🧪 [SIMULATED DRY-RUN] Would perform {action_type} on '{action_param.target}' at ({px}, {py})")
+                            continue
 
                         # Capture for closure
                         _px, _py, _is_micro = px, py, is_micro
