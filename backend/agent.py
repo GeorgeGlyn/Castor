@@ -24,6 +24,7 @@ try:
     from .gemini_pool import gemini_pool
     from .ocr_engine import ocr_engine
     from .model_manager import model_manager
+    from .ast_indexer import ast_indexer
 except ImportError:
     import skills_manager
     import dev_tools
@@ -36,6 +37,7 @@ except ImportError:
     from gemini_pool import gemini_pool
     from ocr_engine import ocr_engine
     from model_manager import model_manager
+    from ast_indexer import ast_indexer
 from fastapi import WebSocket
 from google import genai
 from google.genai import types
@@ -211,6 +213,9 @@ class ActionParams(BaseModel):
     knowledge_id: Optional[str] = None                    # For get_knowledge
     subagent_prompt: Optional[str] = None                 # For invoke_subagent
     swarm_tasks: Optional[list[SwarmTaskItem]] = None     # For spawn_swarm (Concurrent Multi-Agent Swarm)
+    # Phase 7: Codebase AST & Symbol Graph Indexer:
+    symbol_name: Optional[str] = None                     # For find_symbol (e.g. "AgentLoop", "render_runner")
+    kind: Optional[str] = None                            # For find_symbol filter ("class", "function", "method", "interface")
     # Antigravity Living Artifacts:
     artifact_id: Optional[str] = None                     # For update_artifact (e.g. "arch_plan")
     artifact_title: Optional[str] = None                  # For create_artifact
@@ -812,6 +817,8 @@ class AgentLoop:
             if detected:
                 self.current_project_path = detected
                 await self.send_status(f"🎯 Auto-detected active project: {os.path.basename(detected)} ({detected})")
+        if self.current_project_path and os.path.exists(self.current_project_path):
+            asyncio.create_task(asyncio.to_thread(ast_indexer.index_workspace, self.current_project_path))
         # ── Re-read .env fresh on every run so changes take effect immediately ──
         from dotenv import load_dotenv
         load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"), override=True)
@@ -994,6 +1001,8 @@ class AgentLoop:
             "   - 'multi_replace_file_content': atomic non-contiguous edits across multiple sections of a file. Set 'path' and 'replacements' list of {'old_text': '...', 'content': '...'}.\n"
             "   - 'list_dir': list files and folders. Set 'path' (defaults to project root).\n"
             "   - 'grep_search': search for symbols or text across workspace files. Set 'query' and optional 'path'.\n"
+            "   - 'find_symbol': instant AST symbol definition search across the codebase without grepping. Set 'symbol_name' (or 'query') and optional 'kind' ('class', 'function', 'method', 'interface', 'struct'). Returns matching definitions, file paths, and exact line numbers.\n"
+            "   - 'get_file_outline': structural outline of classes, methods, and functions in a file with line numbers without reading the entire file content. Set 'path'.\n"
             "   - 'search_web': live web search (DuckDuckGo) for official documentation, APIs, and error solutions. Set 'query'.\n"
             "   - 'read_url_content': fetch live web page or markdown documentation directly. Set 'path' or 'text' to URL.\n"
             "   - 'list_windows': inspect all open desktop applications and window titles (e.g. Unity, Chrome, VS Code).\n"
@@ -1982,6 +1991,37 @@ class AgentLoop:
                                 role="user",
                                 parts=[types.Part(text=f"[TASK_MANAGER {task_act.upper()} RESULT: {task_id}]\n{task_info}")],
                             ))
+                        await asyncio.sleep(0.2)
+
+                    # ── find_symbol (Phase 7 AST Symbol Search) ───────────────
+                    elif action_type == "find_symbol":
+                        q = (action_param.symbol_name or action_param.query or action_param.target or action_param.text or "").strip()
+                        kind_filter = action_param.kind
+                        await self.send_status(f"🔍 Searching AST symbols for: {q}")
+                        results = ast_indexer.find_symbol(q, kind=kind_filter)
+                        if not results:
+                            sym_text = f"No symbols found matching '{q}'. (Try grep_search if looking for arbitrary string literals)"
+                        else:
+                            lines = [f"Found {len(results)} symbol(s) matching '{q}':"]
+                            for s in results[:15]:
+                                container_str = f" in {s.container}" if s.container else ""
+                                lines.append(f"  • {s.kind.upper()} `{s.name}`{container_str} ({s.file_path}:L{s.line_start}-L{s.line_end}) -> {s.signature}")
+                            sym_text = "\n".join(lines)
+                        rolling_history.append(types.Content(
+                            role="user",
+                            parts=[types.Part(text=f"[AST SYMBOL SEARCH RESULT: {q}]\n{sym_text}")],
+                        ))
+                        await asyncio.sleep(0.2)
+
+                    # ── get_file_outline (Phase 7 AST File Outline) ───────────
+                    elif action_type == "get_file_outline":
+                        target_f = (action_param.path or action_param.target or action_param.text or "").strip()
+                        await self.send_status(f"📑 Extracting AST outline: {target_f}")
+                        outline = ast_indexer.get_file_outline(target_f)
+                        rolling_history.append(types.Content(
+                            role="user",
+                            parts=[types.Part(text=f"[AST FILE OUTLINE: {target_f}]\n{outline}")],
+                        ))
                         await asyncio.sleep(0.2)
 
                     # ── save_knowledge ───────────────────────────────────────

@@ -697,6 +697,16 @@ function ChatWindow() {
   const [isWatchdogAutoScroll, setIsWatchdogAutoScroll] = useState(true);
   const watchdogLogsEndRef = useRef(null);
 
+  // ── Phase 7: Codebase AST & Symbol Graph Indexer State ────────────────────
+  const [isSymbolsModalOpen, setIsSymbolsModalOpen] = useState(false);
+  const [symbolSearchQuery, setSymbolSearchQuery] = useState('');
+  const [selectedSymbolKind, setSelectedSymbolKind] = useState('all');
+  const [symbolSearchResults, setSymbolSearchResults] = useState([]);
+  const [symbolStats, setSymbolStats] = useState({ total_symbols: 0, total_files: 0 });
+  const [isSearchingSymbols, setIsSearchingSymbols] = useState(false);
+  const [selectedSymbol, setSelectedSymbol] = useState(null);
+  const [fileOutlineData, setFileOutlineData] = useState(null);
+
   const fetchProviders = useCallback(async () => {
     try {
       const res = await fetch('http://localhost:8000/api/providers');
@@ -836,6 +846,89 @@ function ChatWindow() {
       watchdogLogsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [watchdogLogsMap, isWatchdogOpen, isWatchdogAutoScroll]);
+
+  // ── Phase 7: AST Symbol Graph Helpers ─────────────────────────────────────
+  const fetchSymbolStats = useCallback(async () => {
+    try {
+      const res = await fetch('http://localhost:8000/api/symbols/stats');
+      if (res.ok) {
+        const data = await res.json();
+        setSymbolStats(data);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch symbol stats:', err);
+    }
+  }, []);
+
+  const searchSymbols = useCallback(async (query, kind = 'all') => {
+    if (!query.trim()) {
+      setSymbolSearchResults([]);
+      return;
+    }
+    try {
+      setIsSearchingSymbols(true);
+      const kindParam = kind !== 'all' ? `&kind=${encodeURIComponent(kind)}` : '';
+      const res = await fetch(`http://localhost:8000/api/symbols/search?q=${encodeURIComponent(query.trim())}${kindParam}`);
+      if (res.ok) {
+        const data = await res.json();
+        setSymbolSearchResults(data.symbols || []);
+      }
+    } catch (err) {
+      console.warn('Failed to search symbols:', err);
+    } finally {
+      setIsSearchingSymbols(false);
+    }
+  }, []);
+
+  const fetchFileOutline = useCallback(async (filePath) => {
+    if (!filePath) return;
+    try {
+      const res = await fetch(`http://localhost:8000/api/symbols/outline?path=${encodeURIComponent(filePath)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setFileOutlineData(data);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch file outline:', err);
+    }
+  }, []);
+
+  const handleReindexSymbols = async () => {
+    try {
+      setIsSearchingSymbols(true);
+      const res = await fetch('http://localhost:8000/api/symbols/reindex', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_path: activeProject?.path || null }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSymbolStats({
+          total_symbols: data.result?.total_symbols || 0,
+          total_files: data.result?.total_files || 0,
+        });
+        if (symbolSearchQuery.trim()) {
+          searchSymbols(symbolSearchQuery, selectedSymbolKind);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to reindex symbols:', err);
+    } finally {
+      setIsSearchingSymbols(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'o') {
+        e.preventDefault();
+        setIsSymbolsModalOpen((prev) => !prev);
+        fetchSymbolStats();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [fetchSymbolStats]);
 
   // ── Reference Images Upload & Clipboard State ─────────────────────────────
   const [attachedImages, setAttachedImages] = useState([]);
@@ -2286,6 +2379,24 @@ function ChatWindow() {
                   {backgroundTasks.filter((t) => t.status === 'running').length > 0
                     ? `${backgroundTasks.filter((t) => t.status === 'running').length} Active`
                     : backgroundTasks.length}
+                </span>
+              )}
+            </button>
+
+            {/* Phase 7: Codebase AST & Symbol Graph Indexer Header Button */}
+            <button
+              onClick={() => {
+                setIsSymbolsModalOpen(true);
+                fetchSymbolStats();
+              }}
+              className="text-xs px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm border text-zinc-400 hover:text-zinc-200 bg-zinc-850 hover:bg-zinc-800 border-zinc-750"
+              title="Codebase AST & Symbol Graph Indexer (Ctrl+Shift+O)"
+            >
+              <span>🔍</span>
+              <span>Symbols</span>
+              {symbolStats.total_symbols > 0 && (
+                <span className="text-[10px] font-mono bg-zinc-700 text-zinc-300 px-1.5 py-0.2 rounded-full font-bold">
+                  {symbolStats.total_symbols}
                 </span>
               )}
             </button>
@@ -4316,6 +4427,258 @@ function ChatWindow() {
                   </div>
                 );
               })()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Phase 7: Codebase AST & Symbol Graph Indexer Modal ─────────────── */}
+      {isSymbolsModalOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setIsSymbolsModalOpen(false)}
+        >
+          <div
+            className="bg-[#101015] border border-blue-900/50 rounded-2xl max-w-5xl w-full h-[85vh] shadow-2xl flex flex-col overflow-hidden ring-1 ring-blue-500/20"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-zinc-800 bg-[#12121a] flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <span className="text-xl">🔍</span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-sm font-semibold text-zinc-100 tracking-wide flex items-center gap-1.5">
+                      <span>Codebase AST & Symbol Graph Indexer</span>
+                      <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950/50 border border-cyan-800/60 px-1.5 py-0.5 rounded">
+                        Phase 7
+                      </span>
+                    </h2>
+                  </div>
+                  <p className="text-[11px] text-zinc-400 font-mono">
+                    {symbolStats.total_symbols || 0} symbols indexed across {symbolStats.total_files || 0} files
+                    {activeProject?.name ? ` in ${activeProject.name}` : ''}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2.5">
+                <button
+                  onClick={handleReindexSymbols}
+                  disabled={isSearchingSymbols}
+                  className="px-2.5 py-1 text-xs font-mono text-zinc-400 hover:text-zinc-200 bg-zinc-800/80 hover:bg-zinc-700/80 rounded-lg border border-zinc-700/60 transition-colors flex items-center gap-1.5 disabled:opacity-40"
+                  title="Force reindex all code files in active project"
+                >
+                  <span className={isSearchingSymbols ? 'animate-spin inline-block' : ''}>🔄</span>
+                  <span>{isSearchingSymbols ? 'Indexing...' : 'Re-index'}</span>
+                </button>
+                <button
+                  onClick={() => setIsSymbolsModalOpen(false)}
+                  className="text-zinc-400 hover:text-zinc-200 text-sm font-mono w-7 h-7 flex items-center justify-center rounded-lg hover:bg-zinc-800 transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Search and Kind Filter Bar */}
+            <div className="px-6 py-3 bg-[#0d0d12] border-b border-zinc-800/80 flex flex-col md:flex-row items-center gap-3 shrink-0">
+              <div className="flex-1 w-full relative">
+                <span className="absolute left-3 top-2.5 text-xs text-zinc-500">🔍</span>
+                <input
+                  type="text"
+                  autoFocus
+                  value={symbolSearchQuery}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSymbolSearchQuery(val);
+                    searchSymbols(val, selectedSymbolKind);
+                  }}
+                  placeholder="Search classes, functions, methods, interfaces, structs... (e.g. AgentLoop, TaskManager)"
+                  className="w-full bg-zinc-900 border border-zinc-750 rounded-xl pl-8 pr-3 py-1.5 text-xs text-zinc-200 font-mono placeholder:text-zinc-600 focus:outline-none focus:border-blue-500/80"
+                />
+              </div>
+
+              {/* Kind Filter Pills */}
+              <div className="flex items-center gap-1 shrink-0 overflow-x-auto w-full md:w-auto">
+                {['all', 'class', 'function', 'method', 'interface', 'struct'].map((kind) => {
+                  const isSelected = selectedSymbolKind === kind;
+                  return (
+                    <button
+                      key={kind}
+                      onClick={() => {
+                        setSelectedSymbolKind(kind);
+                        if (symbolSearchQuery.trim()) {
+                          searchSymbols(symbolSearchQuery, kind);
+                        }
+                      }}
+                      className={`text-[10px] font-mono uppercase px-2 py-1 rounded-lg border transition-colors ${
+                        isSelected
+                          ? 'bg-blue-600 text-white border-blue-500 font-semibold'
+                          : 'bg-zinc-850 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border-zinc-750'
+                      }`}
+                    >
+                      {kind}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Main Split Layout: Search Results & File Outline / Inspector */}
+            <div className="flex-1 min-h-0 flex overflow-hidden">
+              {/* Left Column: Search Results */}
+              <div className="w-1/2 border-r border-zinc-800 bg-[#0d0d12]/60 flex flex-col shrink-0">
+                <div className="px-4 py-2.5 border-b border-zinc-800/80 flex items-center justify-between text-[11px] font-mono text-zinc-400">
+                  <span>Matched Symbols</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300">
+                    {symbolSearchResults.length}
+                  </span>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                  {!symbolSearchQuery.trim() ? (
+                    <div className="text-center py-16 px-4 text-zinc-600 font-mono text-xs">
+                      <div className="text-3xl mb-2">⚡</div>
+                      <p className="text-zinc-400 font-medium">Type a symbol name to search</p>
+                      <p className="text-[11px] mt-1 text-zinc-600">
+                        Instant AST lookups across Python, TypeScript, JavaScript, C#, Go, and Rust.
+                      </p>
+                    </div>
+                  ) : symbolSearchResults.length === 0 ? (
+                    <div className="text-center py-16 px-4 text-zinc-600 font-mono text-xs">
+                      <div className="text-3xl mb-2">📭</div>
+                      <p className="text-zinc-400 font-medium">No symbols found for "{symbolSearchQuery}"</p>
+                      <p className="text-[11px] mt-1 text-zinc-600">
+                        Try a different search term or click "Re-index" to scan new files.
+                      </p>
+                    </div>
+                  ) : (
+                    symbolSearchResults.map((sym, sIdx) => {
+                      const isSelected = selectedSymbol?.name === sym.name && selectedSymbol?.file_path === sym.file_path;
+                      const kindLower = sym.kind.toLowerCase();
+                      const kindBadgeCls = kindLower.includes('class')
+                        ? 'text-cyan-400 bg-cyan-950/40 border-cyan-800/60'
+                        : kindLower.includes('func') || kindLower.includes('method')
+                        ? 'text-emerald-400 bg-emerald-950/40 border-emerald-800/60'
+                        : kindLower.includes('interface') || kindLower.includes('type')
+                        ? 'text-amber-400 bg-amber-950/40 border-amber-800/60'
+                        : 'text-purple-400 bg-purple-950/40 border-purple-800/60';
+
+                      return (
+                        <div
+                          key={`${sym.file_path}-${sym.name}-${sIdx}`}
+                          onClick={() => {
+                            setSelectedSymbol(sym);
+                            fetchFileOutline(sym.file_path);
+                          }}
+                          className={`rounded-xl p-3 border transition-all cursor-pointer ${
+                            isSelected
+                              ? 'bg-blue-950/40 border-blue-600/70 ring-1 ring-blue-500/40'
+                              : 'bg-zinc-900/60 hover:bg-zinc-850/80 border-zinc-800/80'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2 mb-1.5">
+                            <span className="text-xs font-mono font-bold text-zinc-100 truncate flex items-center gap-1.5">
+                              <span>{sym.name}</span>
+                              {sym.container && (
+                                <span className="text-[10px] text-zinc-500 font-normal">
+                                  in {sym.container}
+                                </span>
+                              )}
+                            </span>
+                            <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded uppercase font-bold shrink-0 border ${kindBadgeCls}`}>
+                              {sym.kind}
+                            </span>
+                          </div>
+
+                          <div className="text-[11px] font-mono text-zinc-400 truncate mb-1">
+                            {sym.signature}
+                          </div>
+
+                          <div className="flex items-center justify-between pt-1.5 text-[10px] font-mono text-zinc-500 border-t border-zinc-800/50">
+                            <span className="truncate">{sym.file_path}:L{sym.line_start}-L{sym.line_end}</span>
+                            <span className="uppercase text-[9px] px-1 py-0.2 rounded bg-zinc-800 text-zinc-400">
+                              {sym.language}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* Right Column: File Outline & Signature Inspector */}
+              <div className="w-1/2 flex flex-col bg-[#08080b] min-w-0 overflow-hidden">
+                <div className="px-5 py-2.5 border-b border-zinc-800/90 bg-[#0e0e14] flex items-center justify-between shrink-0">
+                  <div className="flex items-center gap-2 truncate">
+                    <span className="text-xs font-mono text-zinc-300 font-semibold truncate">
+                      {selectedSymbol ? `${selectedSymbol.file_path}` : 'File Outline & Details'}
+                    </span>
+                  </div>
+                  {selectedSymbol && (
+                    <button
+                      onClick={() => {
+                        const loc = `${selectedSymbol.file_path}:${selectedSymbol.line_start}`;
+                        navigator.clipboard?.writeText(loc);
+                        setAgentStatus(`📋 Copied location: ${loc}`);
+                      }}
+                      className="text-[10px] font-mono px-2 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded border border-zinc-700/60 transition-colors shrink-0"
+                    >
+                      Copy Location
+                    </button>
+                  )}
+                </div>
+
+                {selectedSymbol ? (
+                  <div className="flex-1 flex flex-col p-4 overflow-y-auto space-y-4">
+                    {/* Symbol Detail Card */}
+                    <div className="p-3 bg-[#111218] rounded-xl border border-blue-900/40 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-mono font-bold text-zinc-100">
+                          {selectedSymbol.name}
+                        </span>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded uppercase font-bold bg-blue-950 text-blue-300 border border-blue-800/60">
+                          {selectedSymbol.kind}
+                        </span>
+                      </div>
+                      <div className="p-2 bg-black/60 rounded-lg border border-zinc-800 font-mono text-xs text-cyan-300 whitespace-pre-wrap select-text">
+                        {selectedSymbol.signature}
+                      </div>
+                      {selectedSymbol.docstring && (
+                        <p className="text-xs text-zinc-400 font-mono italic whitespace-pre-wrap select-text leading-relaxed">
+                          "{selectedSymbol.docstring.trim()}"
+                        </p>
+                      )}
+                      <div className="text-[11px] font-mono text-zinc-500">
+                        Lines {selectedSymbol.line_start} to {selectedSymbol.line_end} • {selectedSymbol.file_path}
+                      </div>
+                    </div>
+
+                    {/* File Outline */}
+                    <div className="flex-1 min-h-0 flex flex-col">
+                      <div className="text-xs font-semibold text-zinc-300 mb-1.5 flex items-center justify-between">
+                        <span>File Structural Outline:</span>
+                        <span className="text-[10px] font-mono text-zinc-500">
+                          {fileOutlineData?.symbols?.length || 0} Symbols
+                        </span>
+                      </div>
+                      <div className="flex-1 p-3 bg-[#0a0a0d] rounded-xl border border-zinc-800/80 font-mono text-xs text-zinc-300 whitespace-pre-wrap overflow-y-auto leading-relaxed select-text">
+                        {fileOutlineData?.outline || 'Loading structural outline...'}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center text-zinc-600 font-mono text-xs p-6 text-center">
+                    <div className="text-4xl mb-3">📑</div>
+                    <p className="text-zinc-400 font-medium">Select a symbol to view outline</p>
+                    <p className="text-zinc-600 mt-1 max-w-xs">
+                      Inspect signatures, docstrings, classes, methods, and full file hierarchy.
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
