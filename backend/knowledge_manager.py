@@ -132,6 +132,29 @@ class KnowledgeManager:
         lines.append("\nYou can view full details of any Knowledge Item using action 'get_knowledge'.")
         return "\n".join(lines)
 
+    def delete_knowledge(
+        self,
+        item_id: str,
+        workspace_path: Optional[str] = None,
+        project_path: Optional[str] = None,
+    ) -> Tuple[bool, str]:
+        """Delete a specific Knowledge Item by ID."""
+        clean_id = item_id.strip()
+        dirs = [self.global_dir]
+        ws_dir = self._get_workspace_dir(workspace_path, project_path)
+        if ws_dir and ws_dir not in dirs:
+            dirs.append(ws_dir)
+
+        for d in dirs:
+            fpath = os.path.join(d, f"{clean_id}.json")
+            if os.path.exists(fpath):
+                try:
+                    os.remove(fpath)
+                    return True, f"Successfully deleted Knowledge Item '{clean_id}'."
+                except Exception as e:
+                    return False, f"Failed to delete {clean_id}: {e}"
+        return False, f"Knowledge Item '{clean_id}' not found."
+
 
 # Global singleton instance
 knowledge_manager = KnowledgeManager()
