@@ -37,7 +37,19 @@ class ModelProviderInfo(BaseModel):
 
 
 DEFAULT_MODEL_CATALOG: Dict[str, List[str]] = {
-    "gemini": ["gemini-3.7-pro-preview", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite"],
+    "gemini": [
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-2.5-computer-use-preview-10-2025",
+        "gemini-3.7-flash",
+        "gemini-3.8-flash",
+        "gemini-3.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-3.1-pro-preview",
+        "gemini-3-flash-preview",
+        "gemini-flash-latest",
+        "gemini-pro-latest",
+    ],
     "ollama": ["qwen2.5:3b", "qwen2.5-coder:14b", "llama3.2-vision:11b", "deepseek-r1:8b"],
     "deepseek": ["deepseek-chat", "deepseek-reasoner"],
     "openai": ["gpt-4o", "gpt-4o-mini", "o3-mini", "o1"],
@@ -79,6 +91,48 @@ class ModelManager:
         self.openrouter_base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
         self.openrouter_model = os.getenv("OPENROUTER_MODEL", "anthropic/claude-3.7-sonnet")
 
+    async def get_gemini_available_models(self) -> List[str]:
+        """Dynamically query Google GenAI API for currently available models."""
+        def _fetch():
+            try:
+                client, _ = gemini_pool.get_active_client_and_key()
+                if not client:
+                    return list(DEFAULT_MODEL_CATALOG["gemini"])
+                models_found = []
+                for m in client.models.list():
+                    clean_name = m.name.replace("models/", "")
+                    actions = getattr(m, "supported_actions", None) or []
+                    if "generateContent" in actions:
+                        if "gemini" in clean_name.lower() and not any(
+                            x in clean_name.lower()
+                            for x in ["embedding", "tts", "transcribe", "audio", "image", "live", "banana", "robotics"]
+                        ):
+                            models_found.append(clean_name)
+                priority_order = [
+                    "gemini-2.5-flash",
+                    "gemini-2.5-pro",
+                    "gemini-2.5-computer-use-preview-10-2025",
+                    "gemini-3.7-flash",
+                    "gemini-3.8-flash",
+                    "gemini-3.5-flash",
+                    "gemini-2.5-flash-lite",
+                    "gemini-3.1-pro-preview",
+                    "gemini-3-flash-preview",
+                    "gemini-flash-latest",
+                    "gemini-pro-latest",
+                ]
+                sorted_models = []
+                for p in priority_order:
+                    if p in models_found:
+                        sorted_models.append(p)
+                for m in models_found:
+                    if m not in sorted_models:
+                        sorted_models.append(m)
+                return sorted_models if sorted_models else list(DEFAULT_MODEL_CATALOG["gemini"])
+            except Exception:
+                return list(DEFAULT_MODEL_CATALOG["gemini"])
+        return await asyncio.to_thread(_fetch)
+
     async def get_ollama_local_models(self) -> List[str]:
         """Query local Ollama server tags to find downloaded models on user's machine."""
         def _fetch():
@@ -92,7 +146,11 @@ class ModelManager:
                 return []
         return await asyncio.to_thread(_fetch)
 
-    def get_available_providers(self, ollama_models: Optional[List[str]] = None) -> List[ModelProviderInfo]:
+    def get_available_providers(
+        self,
+        ollama_models: Optional[List[str]] = None,
+        gemini_models: Optional[List[str]] = None,
+    ) -> List[ModelProviderInfo]:
         """Returns catalog of configured providers, their availability, and supported models."""
         ollama_model_list = list(ollama_models or [])
         for m in DEFAULT_MODEL_CATALOG["ollama"]:
@@ -100,6 +158,10 @@ class ModelManager:
                 ollama_model_list.append(m)
         if self.ollama_model not in ollama_model_list:
             ollama_model_list.insert(0, self.ollama_model)
+
+        gemini_model_list = list(gemini_models or DEFAULT_MODEL_CATALOG["gemini"])
+        if self.gemini_model not in gemini_model_list:
+            gemini_model_list.insert(0, self.gemini_model)
 
         def _build_models(prov_id: str, active_m: str) -> List[str]:
             catalog = list(DEFAULT_MODEL_CATALOG.get(prov_id, []))
@@ -115,7 +177,7 @@ class ModelManager:
                 is_local=False,
                 default_model="gemini-2.5-flash",
                 active_model=self.gemini_model,
-                models=_build_models("gemini", self.gemini_model),
+                models=gemini_model_list,
             ),
             ModelProviderInfo(
                 id="ollama",

@@ -94,7 +94,13 @@ async def list_providers():
     ollama_models = []
     if ollama_online:
         ollama_models = await model_manager.get_ollama_local_models()
-    providers = model_manager.get_available_providers(ollama_models=ollama_models)
+
+    gemini_models = await model_manager.get_gemini_available_models()
+
+    providers = model_manager.get_available_providers(
+        ollama_models=ollama_models,
+        gemini_models=gemini_models,
+    )
     for p in providers:
         if p.id == "ollama":
             p.is_available = ollama_online
