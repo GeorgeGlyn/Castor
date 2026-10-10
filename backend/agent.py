@@ -11,7 +11,7 @@ try:
     import pyperclip
 except ImportError:
     pyperclip = None
-from typing import Optional
+from typing import Optional, Dict, Any, List, Tuple
 try:
     from . import skills_manager
     from . import dev_tools
@@ -1521,6 +1521,15 @@ class AgentLoop:
                     track_prefix = "👁️ [Visual-Track]" if is_visual_action else "⚡ [Fast-Track]"
                     await self.send_status(f"{track_prefix} {action_type.upper()}" + (f" — {action_param.target or action_param.text or ''}" if (action_param.target or action_param.text) else ""))
 
+                    async def stream_subagent_event(ev: Dict[str, Any]):
+                        try:
+                            await self.websocket.send_json({
+                                "type": "subagent_event",
+                                "event": ev,
+                            })
+                        except Exception:
+                            pass
+
                     # ── done ─────────────────────────────────────────────────
                     if action_type == "done":
                         done_text = (action_param.text or action_param.target or "").strip()
@@ -2054,18 +2063,8 @@ class AgentLoop:
                         ))
                         await asyncio.sleep(0.2)
 
-                    # Helper for live subagent streaming events to frontend
-                    async def stream_subagent_event(ev: Dict[str, Any]):
-                        try:
-                            await self.websocket.send_json({
-                                "type": "subagent_event",
-                                "event": ev,
-                            })
-                        except Exception:
-                            pass
-
                     # ── invoke_subagent (Subagent Delegation) ────────────────
-                    if action_type == "invoke_subagent":
+                    elif action_type == "invoke_subagent":
                         sub_prompt = action_param.subagent_prompt or action_param.text or action_param.target or ""
                         if not sub_prompt:
                             await self.send_status("⚠️ invoke_subagent requires a subagent_prompt.")
