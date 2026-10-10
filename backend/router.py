@@ -10,12 +10,14 @@ try:
     from .model_manager import model_manager
     from .task_manager import task_manager
     from .ast_indexer import ast_indexer
+    from .checkpoint_manager import checkpoint_manager
 except ImportError:
     from agent import AgentLoop, get_monitors_info
     from artifacts_manager import artifacts_manager
     from model_manager import model_manager
     from task_manager import task_manager
     from ast_indexer import ast_indexer
+    from checkpoint_manager import checkpoint_manager
 
 router = APIRouter()
 
@@ -235,6 +237,46 @@ async def get_symbol_stats():
         "last_indexed": ast_indexer.last_indexed,
     }
 
+# ── Phase 8: Git Checkpoints & Interactive Rollback Timeline Endpoints ───────
+
+class CreateCheckpointRequest(BaseModel):
+    description: str = "Manual snapshot"
+    project_path: Optional[str] = None
+
+class RestoreCheckpointRequest(BaseModel):
+    project_path: Optional[str] = None
+    create_backup: bool = True
+
+@router.get("/api/checkpoints")
+async def list_checkpoints(project_path: Optional[str] = None):
+    checkpoints = checkpoint_manager.list_checkpoints_data(project_path)
+    return {"checkpoints": checkpoints}
+
+@router.post("/api/checkpoints/create")
+async def create_checkpoint_endpoint(req: CreateCheckpointRequest):
+    ok, msg = checkpoint_manager.create_checkpoint(req.description, req.project_path)
+    checkpoints = checkpoint_manager.list_checkpoints_data(req.project_path)
+    return {"success": ok, "message": msg, "checkpoints": checkpoints}
+
+@router.get("/api/checkpoints/{checkpoint_id}/diff")
+async def get_checkpoint_diff(checkpoint_id: str, project_path: Optional[str] = None):
+    ok, msg, diff_data = checkpoint_manager.get_diff(checkpoint_id, project_path)
+    return {"success": ok, "message": msg, "diff": diff_data}
+
+@router.post("/api/checkpoints/{checkpoint_id}/restore")
+async def restore_checkpoint_endpoint(checkpoint_id: str, req: RestoreCheckpointRequest):
+    ok, msg = checkpoint_manager.restore_checkpoint(
+        checkpoint_id, req.project_path, create_backup=req.create_backup
+    )
+    checkpoints = checkpoint_manager.list_checkpoints_data(req.project_path)
+    return {"success": ok, "message": msg, "checkpoints": checkpoints}
+
+@router.delete("/api/checkpoints/{checkpoint_id}")
+async def delete_checkpoint_endpoint(checkpoint_id: str, project_path: Optional[str] = None):
+    ok, msg = checkpoint_manager.delete_checkpoint(checkpoint_id, project_path)
+    checkpoints = checkpoint_manager.list_checkpoints_data(project_path)
+    return {"success": ok, "message": msg, "checkpoints": checkpoints}
+
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[WebSocket, AgentLoop] = {}
@@ -423,6 +465,50 @@ async def websocket_endpoint(websocket: WebSocket):
                     "type": "symbols_result",
                     "query": q,
                     "symbols": [s.to_dict() for s in results[:50]],
+                }, websocket)
+
+            elif action == "get_checkpoints":
+                p_path = data.get("project_path") or agent_loop.current_project_path
+                await manager.send_message({
+                    "type": "checkpoints_list",
+                    "checkpoints": checkpoint_manager.list_checkpoints_data(p_path)
+                }, websocket)
+
+            elif action == "create_checkpoint":
+                desc = data.get("description", "Manual snapshot")
+                p_path = data.get("project_path") or agent_loop.current_project_path
+                ok, msg = checkpoint_manager.create_checkpoint(desc, p_path)
+                await manager.send_message({
+                    "type": "checkpoint_action_result",
+                    "action": "create",
+                    "success": ok,
+                    "message": msg,
+                    "checkpoints": checkpoint_manager.list_checkpoints_data(p_path)
+                }, websocket)
+
+            elif action == "restore_checkpoint":
+                cp_id = data.get("checkpoint_id")
+                p_path = data.get("project_path") or agent_loop.current_project_path
+                ok, msg = checkpoint_manager.restore_checkpoint(cp_id, p_path, create_backup=True)
+                await manager.send_message({
+                    "type": "checkpoint_action_result",
+                    "action": "restore",
+                    "checkpoint_id": cp_id,
+                    "success": ok,
+                    "message": msg,
+                    "checkpoints": checkpoint_manager.list_checkpoints_data(p_path)
+                }, websocket)
+
+            elif action == "get_checkpoint_diff":
+                cp_id = data.get("checkpoint_id")
+                p_path = data.get("project_path") or agent_loop.current_project_path
+                ok, msg, diff_data = checkpoint_manager.get_diff(cp_id, p_path)
+                await manager.send_message({
+                    "type": "checkpoint_diff_result",
+                    "checkpoint_id": cp_id,
+                    "success": ok,
+                    "message": msg,
+                    "diff": diff_data
                 }, websocket)
 
     except WebSocketDisconnect:
