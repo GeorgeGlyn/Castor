@@ -5345,7 +5345,7 @@ function ChatWindow() {
                       <div className="absolute bottom-full left-0 mb-2 w-72 bg-[#12131a] border border-zinc-800 rounded-xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in duration-150">
                         <div className="px-2 py-1 text-[10px] font-mono uppercase tracking-wider text-zinc-500 border-b border-zinc-800/60 pb-1.5 flex items-center justify-between">
                           <span>Security Policy &amp; Guardrails</span>
-                          <span className="text-[9px] text-zinc-400">Phase 11</span>
+                          <span className="text-[9px] text-zinc-400">Security</span>
                         </div>
 
                         {/* Guarded (Default) */}
@@ -6026,7 +6026,7 @@ function ChatWindow() {
                     <h2 className="text-sm font-semibold text-zinc-100 tracking-wide flex items-center gap-1.5">
                       <span>Terminal & Process Watchdog</span>
                       <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950/50 border border-cyan-800/60 px-1.5 py-0.5 rounded">
-                        Phase 6
+                        Background
                       </span>
                     </h2>
                   </div>
@@ -6344,7 +6344,7 @@ function ChatWindow() {
                     <h2 className="text-sm font-semibold text-zinc-100 tracking-wide flex items-center gap-1.5">
                       <span>Codebase AST & Symbol Graph Indexer</span>
                       <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950/50 border border-cyan-800/60 px-1.5 py-0.5 rounded">
-                        Phase 7
+                        AST Indexer
                       </span>
                     </h2>
                   </div>
@@ -6596,7 +6596,7 @@ function ChatWindow() {
                     <h2 className="text-sm font-semibold text-zinc-100 tracking-wide flex items-center gap-1.5">
                       <span>Git Checkpoints &amp; Rollback Timeline</span>
                       <span className="text-[10px] font-mono text-amber-400 bg-amber-950/60 border border-amber-800/60 px-1.5 py-0.5 rounded">
-                        Phase 8 • Zero-Risk Rewinds
+                        Zero-Risk Rewinds
                       </span>
                     </h2>
                   </div>
@@ -7017,7 +7017,7 @@ function ChatWindow() {
                     <h2 className="text-sm font-semibold text-zinc-100 tracking-wide flex items-center gap-1.5">
                       <span>Real-Time Diagnostic Lint &amp; Compiler Inspector</span>
                       <span className="text-[10px] font-mono text-rose-400 bg-rose-950/60 border border-rose-800/60 px-1.5 py-0.5 rounded">
-                        Phase 9 • Self-Correcting Loop
+                        Self-Correcting Loop
                       </span>
                     </h2>
                   </div>
