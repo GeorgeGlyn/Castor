@@ -7,9 +7,11 @@ from pydantic import BaseModel
 try:
     from .agent import AgentLoop, get_monitors_info
     from .artifacts_manager import artifacts_manager
+    from .model_manager import model_manager
 except ImportError:
     from agent import AgentLoop, get_monitors_info
     from artifacts_manager import artifacts_manager
+    from model_manager import model_manager
 
 router = APIRouter()
 
@@ -85,6 +87,62 @@ async def get_project_artifact(artifact_id: str, project_path: Optional[str] = N
     if not art:
         return {"error": f"Artifact '{artifact_id}' not found", "found": False}
     return {"artifact": art.model_dump(), "found": True}
+ 
+@router.get("/api/providers")
+async def list_providers():
+    ollama_online = await model_manager.check_ollama_health()
+    providers = model_manager.get_available_providers()
+    for p in providers:
+        if p.id == "ollama":
+            p.is_available = ollama_online
+    return {
+        "providers": [p.model_dump() for p in providers],
+        "active_provider": model_manager.active_provider,
+    }
+
+class SetProviderRequest(BaseModel):
+    provider: str
+    model: Optional[str] = None
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+
+@router.post("/api/providers/select")
+async def select_provider(req: SetProviderRequest):
+    p_id = req.provider.lower()
+    model_manager.active_provider = p_id
+    os.environ["ACTIVE_PROVIDER"] = p_id
+
+    if req.model:
+        os.environ["PLANNER_MODEL"] = req.model
+        if p_id == "ollama":
+            model_manager.ollama_model = req.model
+        elif p_id == "deepseek":
+            model_manager.deepseek_model = req.model
+        elif p_id == "openai":
+            model_manager.openai_model = req.model
+        elif p_id == "anthropic":
+            model_manager.anthropic_model = req.model
+        elif p_id == "openrouter":
+            model_manager.openrouter_model = req.model
+
+    if req.api_key:
+        if p_id == "deepseek":
+            model_manager.deepseek_api_key = req.api_key
+        elif p_id == "openai":
+            model_manager.openai_api_key = req.api_key
+        elif p_id == "anthropic":
+            model_manager.anthropic_api_key = req.api_key
+        elif p_id == "openrouter":
+            model_manager.openrouter_api_key = req.api_key
+
+    if req.base_url and p_id == "ollama":
+        model_manager.ollama_base_url = req.base_url
+
+    return {
+        "success": True,
+        "active_provider": model_manager.active_provider,
+        "model": req.model,
+    }
 
 class ConnectionManager:
     def __init__(self):
