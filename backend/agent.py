@@ -151,6 +151,8 @@ class Scratchpad(BaseModel):
     current_sub_task: str
     completed_steps: list[str] = []
     tasks: list[TaskItem] = []
+    track: Optional[str] = "fast_track"  # "fast_track" (Code/CLI/Files) | "visual_track" (GUI/Desktop) | "hybrid"
+    verification_strategy: Optional[str] = None  # Expected verification check for this sub-task
 
 
 class QuestionOptionItem(BaseModel):
@@ -949,7 +951,22 @@ class AgentLoop:
             "   - To open a new application: emit a batch with action 'hotkey' (keys: ['win']), "
             "     action 'type' (text: 'Unity Hub' or application name), and action 'hotkey' (keys: ['enter']).\n"
             "   - Alternatively, use action 'bash' to inspect or launch software (e.g., PowerShell commands).\n"
-            "   - If the application icon is already visible on the taskbar or desktop, click it.\n"
+            "   - If the application icon is already visible on the taskbar or desktop, click it.\n\n"
+            "=== ASTRA DUAL-TRACK EXECUTION LAW (FAST-PATH VS VISUAL COMPUTER USE) ===\n"
+            "To maximize execution speed, deterministic accuracy, and eliminate token waste, you must route tasks to the correct track:\n"
+            "1. TRACK A: HEADLESS FAST-PATH (MANDATORY FOR CODE, FILES, GIT, PACKAGES & CLI):\n"
+            "   - When reading, creating, modifying, testing, or searching files:\n"
+            "     ALWAYS use 'view_file', 'write_to_file', 'replace_file_content', 'multi_replace_file_content', 'grep_search', 'bash', 'run_tests'.\n"
+            "     NEVER attempt to click text editors, drag scrollbars, or type code via GUI keyboard emulation!\n"
+            "   - Headless execution runs at compiler speeds, without vision errors or coordinate misses.\n"
+            "2. TRACK B: VISUAL COMPUTER-USE TRACK (RESERVED FOR EXTERNAL GUI SOFTWARE & VISUAL QA):\n"
+            "   - Use for:\n"
+            "     * Interacting with external GUI software (Unity Editor, Blender, Unreal Engine, web browser windows, simulator viewports).\n"
+            "     * Clicking game engine controls ('Play', 'Pause', scene viewports, hierarchy inspectors).\n"
+            "     * Visually confirming rendering fidelity against user-uploaded reference images.\n"
+            "     * Interacting with modal dialogs or desktop OS windows.\n"
+            "3. HYBRID WORKFLOW:\n"
+            "   - For example: Generate or patch C# scripts via Fast-Track ('replace_file_content'), then switch to Visual-Track to press 'Play' in Unity and verify gameplay!\n\n"
             "5. AVAILABLE ACTIONS:\n"
             "   [GUI Desktop Actions]\n"
             "   - 'click': set 'target' to a clear semantic description of the element to click "
@@ -1399,7 +1416,9 @@ class AgentLoop:
                             ))
                             continue
 
-                    await self.send_status(f"▶ Executing: {action_type.upper()}" + (f" — {action_param.target or action_param.text or ''}" if (action_param.target or action_param.text) else ""))
+                    is_visual_action = action_type in ["click", "drag", "type", "hotkey", "scroll"]
+                    track_prefix = "👁️ [Visual-Track]" if is_visual_action else "⚡ [Fast-Track]"
+                    await self.send_status(f"{track_prefix} {action_type.upper()}" + (f" — {action_param.target or action_param.text or ''}" if (action_param.target or action_param.text) else ""))
 
                     # ── done ─────────────────────────────────────────────────
                     if action_type == "done":
