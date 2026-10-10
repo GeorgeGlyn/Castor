@@ -11,6 +11,7 @@ try:
     from .task_manager import task_manager
     from .ast_indexer import ast_indexer
     from .checkpoint_manager import checkpoint_manager
+    from .diagnostic_engine import diagnostic_engine
 except ImportError:
     from agent import AgentLoop, get_monitors_info
     from artifacts_manager import artifacts_manager
@@ -18,6 +19,7 @@ except ImportError:
     from task_manager import task_manager
     from ast_indexer import ast_indexer
     from checkpoint_manager import checkpoint_manager
+    from diagnostic_engine import diagnostic_engine
 
 router = APIRouter()
 
@@ -277,6 +279,27 @@ async def delete_checkpoint_endpoint(checkpoint_id: str, project_path: Optional[
     checkpoints = checkpoint_manager.list_checkpoints_data(project_path)
     return {"success": ok, "message": msg, "checkpoints": checkpoints}
 
+# ── Phase 9: Real-Time Diagnostic Lint & LSP Compiler Loop Endpoints ─────────
+
+class CheckFileDiagnosticRequest(BaseModel):
+    file_path: str
+    project_path: Optional[str] = None
+
+@router.get("/api/diagnostics")
+async def get_workspace_diagnostics(project_path: Optional[str] = None):
+    res = diagnostic_engine.check_workspace(project_path)
+    return res
+
+@router.post("/api/diagnostics/file")
+async def check_file_diagnostics_endpoint(req: CheckFileDiagnosticRequest):
+    issues = diagnostic_engine.check_file(req.file_path, req.project_path)
+    return {
+        "file": req.file_path,
+        "total_issues": len(issues),
+        "issues": [i.to_dict() for i in issues],
+        "clean": len([i for i in issues if i.severity == "error"]) == 0,
+    }
+
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[WebSocket, AgentLoop] = {}
@@ -509,6 +532,25 @@ async def websocket_endpoint(websocket: WebSocket):
                     "success": ok,
                     "message": msg,
                     "diff": diff_data
+                }, websocket)
+
+            elif action == "get_diagnostics":
+                p_path = data.get("project_path") or agent_loop.current_project_path
+                res_diag = diagnostic_engine.check_workspace(p_path)
+                await manager.send_message({
+                    "type": "diagnostics_result",
+                    "diagnostics": res_diag
+                }, websocket)
+
+            elif action == "check_file_diagnostics":
+                f_path = data.get("file_path", "")
+                p_path = data.get("project_path") or agent_loop.current_project_path
+                issues = diagnostic_engine.check_file(f_path, p_path)
+                await manager.send_message({
+                    "type": "file_diagnostics_result",
+                    "file": f_path,
+                    "issues": [i.to_dict() for i in issues],
+                    "clean": len([i for i in issues if i.severity == "error"]) == 0,
                 }, websocket)
 
     except WebSocketDisconnect:
