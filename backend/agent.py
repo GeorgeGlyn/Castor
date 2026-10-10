@@ -25,6 +25,7 @@ try:
     from .ocr_engine import ocr_engine
     from .model_manager import model_manager
     from .ast_indexer import ast_indexer
+    from .diagnostic_engine import diagnostic_engine
 except ImportError:
     import skills_manager
     import dev_tools
@@ -38,6 +39,7 @@ except ImportError:
     from ocr_engine import ocr_engine
     from model_manager import model_manager
     from ast_indexer import ast_indexer
+    from diagnostic_engine import diagnostic_engine
 from fastapi import WebSocket
 from google import genai
 from google.genai import types
@@ -179,7 +181,7 @@ class SwarmTaskItem(BaseModel):
 
 
 class ActionParams(BaseModel):
-    action: str        # "click" | "drag" | "type" | "hotkey" | "scroll" | "bash" | "done" | "skill" | "run_skill_script" | "view_file" | "write_to_file" | "replace_file_content" | "multi_replace_file_content" | "list_dir" | "grep_search" | "search_web" | "read_url_content" | "list_windows" | "focus_window" | "check_unity_diagnostics" | "schedule" | "create_checkpoint" | "restore_checkpoint" | "list_checkpoints" | "generate_image_asset" | "run_tests" | "read_clipboard" | "set_clipboard" | "read_screen_text" | "switch_monitor" | "ask_question" | "manage_task" | "save_knowledge" | "get_knowledge" | "invoke_subagent" | "spawn_swarm" | "create_artifact" | "update_artifact"
+    action: str        # "click" | "drag" | "type" | "hotkey" | "scroll" | "bash" | "done" | "skill" | "run_skill_script" | "view_file" | "write_to_file" | "replace_file_content" | "multi_replace_file_content" | "list_dir" | "grep_search" | "search_web" | "read_url_content" | "list_windows" | "focus_window" | "check_unity_diagnostics" | "schedule" | "create_checkpoint" | "restore_checkpoint" | "list_checkpoints" | "generate_image_asset" | "run_tests" | "read_clipboard" | "set_clipboard" | "read_screen_text" | "switch_monitor" | "ask_question" | "manage_task" | "save_knowledge" | "get_knowledge" | "invoke_subagent" | "spawn_swarm" | "create_artifact" | "update_artifact" | "run_diagnostics"
 
 
 
@@ -1788,6 +1790,14 @@ class AgentLoop:
                                     "type": "file_diff",
                                     "diff": diff_info,
                                 })
+                            # Phase 9: Real-Time Diagnostic Lint Verification
+                            resolved_p = dev_tools._resolve_path(f_path, self.current_project_path)
+                            diag_issues = diagnostic_engine.check_file(resolved_p, self.current_project_path)
+                            diag_errs = [i for i in diag_issues if i.severity == "error"]
+                            if diag_errs:
+                                err_lines = "\n".join([f"  • Line {i.line}:{i.column} [{i.source}] {i.message}" for i in diag_errs])
+                                await self.send_status(f"🚨 Diagnostic Compiler Error in {os.path.basename(f_path)}!")
+                                res_text += f"\n\n[COMPILER / LINT DIAGNOSTIC ALERT]\nFound {len(diag_errs)} syntax/compile error(s) in '{f_path}':\n{err_lines}\nPlease fix these compiler errors immediately in your next step."
                         else:
                             await self.send_status(f"⚠️ write_to_file error: {res_text}")
                         rolling_history.append(types.Content(
@@ -1825,6 +1835,14 @@ class AgentLoop:
                                     "type": "file_diff",
                                     "diff": diff_info,
                                 })
+                            # Phase 9: Real-Time Diagnostic Lint Verification
+                            resolved_p = dev_tools._resolve_path(f_path, self.current_project_path)
+                            diag_issues = diagnostic_engine.check_file(resolved_p, self.current_project_path)
+                            diag_errs = [i for i in diag_issues if i.severity == "error"]
+                            if diag_errs:
+                                err_lines = "\n".join([f"  • Line {i.line}:{i.column} [{i.source}] {i.message}" for i in diag_errs])
+                                await self.send_status(f"🚨 Diagnostic Compiler Error in {os.path.basename(f_path)}!")
+                                res_text += f"\n\n[COMPILER / LINT DIAGNOSTIC ALERT]\nFound {len(diag_errs)} syntax/compile error(s) in '{f_path}':\n{err_lines}\nPlease fix these compiler errors immediately in your next step."
                         else:
                             await self.send_status(f"⚠️ replace_file_content error: {res_text}")
                         rolling_history.append(types.Content(
@@ -1908,6 +1926,14 @@ class AgentLoop:
                                     "type": "file_diff",
                                     "diff": diff_info,
                                 })
+                            # Phase 9: Real-Time Diagnostic Lint Verification
+                            resolved_p = dev_tools._resolve_path(f_path, self.current_project_path)
+                            diag_issues = diagnostic_engine.check_file(resolved_p, self.current_project_path)
+                            diag_errs = [i for i in diag_issues if i.severity == "error"]
+                            if diag_errs:
+                                err_lines = "\n".join([f"  • Line {i.line}:{i.column} [{i.source}] {i.message}" for i in diag_errs])
+                                await self.send_status(f"🚨 Diagnostic Compiler Error in {os.path.basename(f_path)}!")
+                                res_text += f"\n\n[COMPILER / LINT DIAGNOSTIC ALERT]\nFound {len(diag_errs)} syntax/compile error(s) in '{f_path}':\n{err_lines}\nPlease fix these compiler errors immediately in your next step."
                         else:
                             await self.send_status(f"⚠️ multi_replace error: {res_text}")
                         rolling_history.append(types.Content(
@@ -2030,6 +2056,25 @@ class AgentLoop:
                         rolling_history.append(types.Content(
                             role="user",
                             parts=[types.Part(text=f"[AST FILE OUTLINE: {target_f}]\n{outline}")],
+                        ))
+                        await asyncio.sleep(0.2)
+
+                    # ── run_diagnostics (Phase 9 Real-Time Compiler Diagnostics) ─
+                    elif action_type == "run_diagnostics":
+                        target_p = action_param.path or self.current_project_path
+                        await self.send_status(f"🩺 Running compiler & linter diagnostics on workspace...")
+                        res_diag = await asyncio.to_thread(diagnostic_engine.check_workspace, target_p)
+                        tot_err = res_diag.get("total_errors", 0)
+                        tot_warn = res_diag.get("total_warnings", 0)
+                        if tot_err == 0:
+                            diag_msg = f"✅ All {res_diag.get('scanned_files_count', 0)} files passed diagnostics with 0 errors!"
+                        else:
+                            issues_preview = "\n".join([f"• {i['file']}:{i['line']} [{i['source']}] {i['message']}" for i in res_diag.get("issues", [])[:10]])
+                            diag_msg = f"❌ Found {tot_err} error(s) and {tot_warn} warning(s):\n{issues_preview}"
+                        await self.send_status(diag_msg)
+                        rolling_history.append(types.Content(
+                            role="user",
+                            parts=[types.Part(text=f"[RUN_DIAGNOSTICS RESULT]\n{diag_msg}")],
                         ))
                         await asyncio.sleep(0.2)
 

@@ -720,6 +720,13 @@ function ChatWindow() {
   const [selectedDiffFile, setSelectedDiffFile] = useState(null);
   const [showRestoreConfirm, setShowRestoreConfirm] = useState(null);
 
+  // ── Phase 9: Real-Time Diagnostic Lint & LSP Compiler State ───────────────
+  const [isDiagnosticsModalOpen, setIsDiagnosticsModalOpen] = useState(false);
+  const [diagnosticsData, setDiagnosticsData] = useState(null);
+  const [isLoadingDiagnostics, setIsLoadingDiagnostics] = useState(false);
+  const [diagnosticsFilter, setDiagnosticsFilter] = useState('all'); // 'all' | 'error' | 'warning'
+  const [diagnosticsSearchQuery, setDiagnosticsSearchQuery] = useState('');
+
   const fetchProviders = useCallback(async () => {
     try {
       const res = await fetch('http://localhost:8000/api/providers');
@@ -938,10 +945,15 @@ function ChatWindow() {
         setIsSymbolsModalOpen((prev) => !prev);
         fetchSymbolStats();
       }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        setIsDiagnosticsModalOpen((prev) => !prev);
+        fetchDiagnostics();
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [fetchSymbolStats]);
+  }, [fetchSymbolStats, fetchDiagnostics]);
 
   // ── Phase 8: Checkpoint & Diff Helpers ────────────────────────────────────
   const fetchCheckpointDiff = useCallback(async (checkpointId) => {
@@ -1067,6 +1079,35 @@ function ChatWindow() {
   useEffect(() => {
     fetchCheckpoints();
   }, [fetchCheckpoints]);
+
+  // ── Phase 9: Diagnostics Helpers ──────────────────────────────────────────
+  const fetchDiagnostics = useCallback(async () => {
+    try {
+      setIsLoadingDiagnostics(true);
+      const projParam = activeProject?.path ? `?project_path=${encodeURIComponent(activeProject.path)}` : '';
+      const res = await fetch(`http://localhost:8000/api/diagnostics${projParam}`);
+      if (res.ok) {
+        const data = await res.json();
+        setDiagnosticsData(data);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch diagnostics:', err);
+    } finally {
+      setIsLoadingDiagnostics(false);
+    }
+  }, [activeProject]);
+
+  const handleFixDiagnosticWithAgent = (issue) => {
+    if (!issue) return;
+    const fixPrompt = `Please fix the compiler diagnostic ${issue.severity.toUpperCase()} in \`${issue.file}\` at line ${issue.line}, column ${issue.column}:\n"${issue.message}"\nSource: [${issue.source}]`;
+    setInputMessage(fixPrompt);
+    setIsDiagnosticsModalOpen(false);
+    playSoundCue('start_mic');
+  };
+
+  useEffect(() => {
+    fetchDiagnostics();
+  }, [fetchDiagnostics]);
 
   // ── Reference Images Upload & Clipboard State ─────────────────────────────
   const [attachedImages, setAttachedImages] = useState([]);
@@ -1830,6 +1871,10 @@ function ChatWindow() {
         if (data.diff) {
           setCheckpointDiffData(data.diff);
         }
+      } else if (data.type === 'diagnostics_result') {
+        if (data.diagnostics) {
+          setDiagnosticsData(data.diagnostics);
+        }
       }
 
 
@@ -2570,6 +2615,34 @@ function ChatWindow() {
                   {checkpointsList.length}
                 </span>
               )}
+            </button>
+
+            {/* Phase 9: Real-Time Diagnostic Lint & LSP Compiler Loop Header Button */}
+            <button
+              onClick={() => {
+                setIsDiagnosticsModalOpen(true);
+                fetchDiagnostics();
+              }}
+              className="text-xs px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm border text-zinc-400 hover:text-zinc-200 bg-zinc-850 hover:bg-zinc-800 border-zinc-750"
+              title="Real-Time Diagnostic Lint & LSP Compiler Loop (Ctrl+Shift+D)"
+            >
+              <span>🩺</span>
+              <span>Diagnostics</span>
+              {diagnosticsData ? (
+                diagnosticsData.total_errors > 0 ? (
+                  <span className="text-[10px] font-mono bg-rose-950/80 text-rose-300 border border-rose-800/60 px-1.5 py-0.2 rounded-full font-bold animate-pulse">
+                    {diagnosticsData.total_errors} err
+                  </span>
+                ) : diagnosticsData.total_warnings > 0 ? (
+                  <span className="text-[10px] font-mono bg-amber-950/80 text-amber-300 border border-amber-800/60 px-1.5 py-0.2 rounded-full font-bold">
+                    {diagnosticsData.total_warnings} warn
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-mono bg-emerald-950/80 text-emerald-300 border border-emerald-800/60 px-1.5 py-0.2 rounded-full font-bold">
+                    ✓ clean
+                  </span>
+                )
+              ) : null}
             </button>
 
             {/* Session Export & Run Report Dropdown */}
@@ -5271,6 +5344,215 @@ function ChatWindow() {
                   </>
                 )}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Phase 9: Real-Time Diagnostic Lint & LSP Compiler Inspector Modal ── */}
+      {isDiagnosticsModalOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setIsDiagnosticsModalOpen(false)}
+        >
+          <div
+            className="bg-[#0f1015] border border-rose-900/40 rounded-2xl max-w-4xl w-full h-[85vh] shadow-2xl flex flex-col overflow-hidden ring-1 ring-rose-500/20"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-zinc-800 bg-[#12131a] flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <span className="text-xl">🩺</span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-sm font-semibold text-zinc-100 tracking-wide flex items-center gap-1.5">
+                      <span>Real-Time Diagnostic Lint &amp; Compiler Inspector</span>
+                      <span className="text-[10px] font-mono text-rose-400 bg-rose-950/60 border border-rose-800/60 px-1.5 py-0.5 rounded">
+                        Phase 9 • Self-Correcting Loop
+                      </span>
+                    </h2>
+                  </div>
+                  <p className="text-[11px] text-zinc-400 font-mono">
+                    Scanned {diagnosticsData?.scanned_files_count || 0} code files
+                    {activeProject?.name ? ` in ${activeProject.name}` : ''}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2.5">
+                <button
+                  onClick={fetchDiagnostics}
+                  disabled={isLoadingDiagnostics}
+                  className="px-2.5 py-1 text-xs font-mono text-zinc-300 bg-zinc-800 hover:bg-zinc-750 rounded-lg border border-zinc-700/60 transition-colors flex items-center gap-1.5 disabled:opacity-40"
+                  title="Re-run diagnostic compiler scan"
+                >
+                  <span className={isLoadingDiagnostics ? 'animate-spin inline-block' : ''}>🔄</span>
+                  <span>{isLoadingDiagnostics ? 'Scanning...' : 'Re-scan'}</span>
+                </button>
+                <button
+                  onClick={() => setIsDiagnosticsModalOpen(false)}
+                  className="text-zinc-400 hover:text-zinc-200 text-sm font-mono w-7 h-7 flex items-center justify-center rounded-lg hover:bg-zinc-800 transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Stats Bar & Filter Tabs */}
+            <div className="px-6 py-3 bg-[#0d0e14] border-b border-zinc-800/80 flex flex-col md:flex-row items-center justify-between gap-3 shrink-0">
+              {/* Severity Filter Pills */}
+              <div className="flex items-center gap-1.5">
+                {[
+                  { id: 'all', label: 'All Issues', count: (diagnosticsData?.total_errors || 0) + (diagnosticsData?.total_warnings || 0) },
+                  { id: 'error', label: 'Errors', count: diagnosticsData?.total_errors || 0, badgeCls: 'bg-rose-950 text-rose-300 border-rose-800' },
+                  { id: 'warning', label: 'Warnings', count: diagnosticsData?.total_warnings || 0, badgeCls: 'bg-amber-950 text-amber-300 border-amber-800' },
+                ].map((tab) => {
+                  const isSel = diagnosticsFilter === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => setDiagnosticsFilter(tab.id)}
+                      className={`text-xs font-mono px-3 py-1 rounded-lg border transition-colors flex items-center gap-1.5 ${
+                        isSel
+                          ? 'bg-zinc-800 text-zinc-100 border-zinc-600 font-semibold'
+                          : 'bg-zinc-900/60 hover:bg-zinc-850 text-zinc-400 border-zinc-800'
+                      }`}
+                    >
+                      <span>{tab.label}</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full border ${tab.badgeCls || 'bg-zinc-800 text-zinc-300 border-zinc-700'}`}>
+                        {tab.count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Search Bar */}
+              <div className="w-full md:w-72">
+                <input
+                  type="text"
+                  value={diagnosticsSearchQuery}
+                  onChange={(e) => setDiagnosticsSearchQuery(e.target.value)}
+                  placeholder="Filter by file or error text..."
+                  className="w-full bg-zinc-900 border border-zinc-750 rounded-lg px-2.5 py-1 text-xs text-zinc-200 font-mono placeholder:text-zinc-600 focus:outline-none focus:border-rose-500/70"
+                />
+              </div>
+            </div>
+
+            {/* Diagnostics Issues List */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-3 bg-[#08080b]">
+              {isLoadingDiagnostics ? (
+                <div className="h-full flex items-center justify-center text-zinc-500 font-mono text-xs">
+                  <span className="animate-spin text-xl mr-2">🔄</span>
+                  <span>Compiling and running language diagnostics...</span>
+                </div>
+              ) : diagnosticsData?.clean && (diagnosticsData?.issues?.length || 0) === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-zinc-500 text-center py-24">
+                  <div className="text-5xl mb-3">✨</div>
+                  <h3 className="text-sm font-semibold text-emerald-400">All Files Pass Diagnostics</h3>
+                  <p className="text-xs text-zinc-500 font-mono mt-1 max-w-sm">
+                    Zero compiler, syntax, or lint errors found across all {diagnosticsData?.scanned_files_count || 0} scanned files.
+                  </p>
+                </div>
+              ) : (
+                (() => {
+                  const filtered = (diagnosticsData?.issues || []).filter((iss) => {
+                    if (diagnosticsFilter !== 'all' && iss.severity !== diagnosticsFilter) return false;
+                    if (diagnosticsSearchQuery.trim()) {
+                      const q = diagnosticsSearchQuery.toLowerCase();
+                      return (
+                        iss.file?.toLowerCase().includes(q) ||
+                        iss.message?.toLowerCase().includes(q) ||
+                        iss.source?.toLowerCase().includes(q) ||
+                        iss.rule_id?.toLowerCase().includes(q)
+                      );
+                    }
+                    return true;
+                  });
+
+                  if (filtered.length === 0) {
+                    return (
+                      <div className="text-center py-16 text-zinc-500 font-mono text-xs">
+                        <div className="text-3xl mb-2">🔍</div>
+                        <p>No diagnostics matched the current filter.</p>
+                      </div>
+                    );
+                  }
+
+                  return filtered.map((iss, idx) => {
+                    const isErr = iss.severity === 'error';
+                    return (
+                      <div
+                        key={`${iss.file}-${iss.line}-${idx}`}
+                        className={`rounded-xl p-4 border transition-all ${
+                          isErr
+                            ? 'bg-rose-950/20 border-rose-900/50 hover:border-rose-700/70'
+                            : 'bg-amber-950/20 border-amber-900/50 hover:border-amber-700/70'
+                        }`}
+                      >
+                        {/* Header: Severity, Source, File location */}
+                        <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`text-[10px] font-mono px-2 py-0.5 rounded uppercase font-bold border ${
+                                isErr
+                                  ? 'bg-rose-950 text-rose-300 border-rose-800'
+                                  : 'bg-amber-950 text-amber-300 border-amber-800'
+                              }`}
+                            >
+                              {iss.severity}
+                            </span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/60">
+                              {iss.source}
+                            </span>
+                            {iss.rule_id && (
+                              <span className="text-[10px] font-mono text-zinc-500">
+                                #{iss.rule_id}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-mono text-zinc-300 font-semibold">
+                              {iss.file}:{iss.line}:{iss.column}
+                            </span>
+                            <button
+                              onClick={() => {
+                                const loc = `${iss.file}:${iss.line}`;
+                                navigator.clipboard?.writeText(loc);
+                                setAgentStatus(`📋 Copied location: ${loc}`);
+                              }}
+                              className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-750 text-zinc-400 hover:text-zinc-200 border border-zinc-700/60 transition-colors"
+                              title="Copy file and line location"
+                            >
+                              Copy
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Error Message */}
+                        <div className="p-3 bg-black/60 rounded-lg border border-zinc-850 font-mono text-xs text-zinc-200 select-text whitespace-pre-wrap leading-relaxed mb-3">
+                          {iss.message}
+                        </div>
+
+                        {/* Fix With Agent Action */}
+                        <div className="flex items-center justify-between pt-1 border-t border-zinc-800/40">
+                          <span className="text-[11px] font-mono text-zinc-500">
+                            Line {iss.line}, Column {iss.column}
+                          </span>
+                          <button
+                            onClick={() => handleFixDiagnosticWithAgent(iss)}
+                            className="px-3 py-1 text-xs font-mono font-semibold bg-rose-600 hover:bg-rose-500 text-white rounded-lg transition-colors flex items-center gap-1.5 shadow"
+                          >
+                            <span>⚡</span>
+                            <span>Fix with Agent</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  });
+                })()
+              )}
             </div>
           </div>
         </div>
