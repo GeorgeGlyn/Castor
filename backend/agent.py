@@ -1195,6 +1195,7 @@ class AgentLoop:
                         client=self.client,
                         model=self.planner_model,
                         project_path=self.current_project_path,
+                        goal=clean_goal,
                     )
                     await self.send_status("✅ History compacted. Active context refreshed.")
                 except Exception as comp_err:
