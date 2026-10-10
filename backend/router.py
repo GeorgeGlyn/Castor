@@ -293,7 +293,9 @@ class CreateSkillRequest(BaseModel):
 
 class DistillSkillRequest(BaseModel):
     goal: str
-    steps: list[str]
+    steps: Optional[list[str]] = None
+    completed_steps: Optional[list[str]] = None
+    skill_name: Optional[str] = None
     scope: str = "workspace"
     project_path: Optional[str] = None
 
@@ -336,9 +338,11 @@ async def distill_skill_endpoint(req: DistillSkillRequest):
     except Exception:
         pass
 
+    effective_steps = req.completed_steps if req.completed_steps is not None else (req.steps or [])
     ok, msg, skill_data = skills_manager.distill_workflow_to_skill(
         goal=req.goal,
-        completed_steps=req.steps,
+        completed_steps=effective_steps,
+        skill_name=req.skill_name,
         client=client,
         scope=req.scope,
         project_path=req.project_path,

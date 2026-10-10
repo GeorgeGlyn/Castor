@@ -447,20 +447,28 @@ def delete_custom_skill(
 
 def distill_workflow_to_skill(
     goal: str,
-    completed_steps: List[str],
+    completed_steps: Optional[List[str]] = None,
+    skill_name: Optional[str] = None,
     client=None,
     model: str = "gemini-flash-lite-latest",
     scope: str = "workspace",
     project_path: Optional[str] = None,
 ) -> Tuple[bool, str, Optional[dict]]:
     """
-    Distills a completed execution trajectory into a permanent reusable skill playbook.
+    Distills an execution trajectory or task goal into a permanent reusable skill playbook.
     Uses AI reflection to format triggers, instructions, and procedural steps.
     """
-    if not completed_steps:
-        return False, "Cannot distill an empty workflow. No steps were completed.", None
+    effective_steps = [s for s in (completed_steps or []) if str(s).strip()]
+    if not effective_steps:
+        effective_steps = [
+            f"Initialize project setup and assets for '{goal[:60]}'",
+            "Scaffold core architecture, managers, and data structures",
+            "Implement primary game mechanics, controllers, and state flow",
+            "Configure audio, visual polish, and user interface",
+            "Execute verification testing and compiler checks",
+        ]
 
-    steps_text = "\n".join([f"{i+1}. {s}" for i, s in enumerate(completed_steps)])
+    steps_text = "\n".join([f"{i+1}. {s}" for i, s in enumerate(effective_steps)])
 
     prompt = f"""You are an Expert AI Systems Architect and Skill Distillation Engine.
 The user previously accomplished the following goal:
@@ -516,6 +524,9 @@ TRIGGERS: [<comma-separated keywords>]
                     content_start = idx + 1
                     break
 
+            if skill_name and skill_name.strip():
+                s_name = re.sub(r"[^a-z0-9_-]", "", skill_name.lower().strip().replace(" ", "-"))
+
             body_content = "\n".join(lines[content_start:]).strip() if content_start > 0 else raw
             return create_custom_skill(
                 name=s_name,
@@ -529,7 +540,10 @@ TRIGGERS: [<comma-separated keywords>]
             print(f"[SkillsManager] Error during AI workflow distillation: {e}")
 
     # Fallback heuristic distillation without AI model
-    clean_slug = re.sub(r"[^a-z0-9_-]", "", goal.lower().replace(" ", "-"))[:25] or "session-workflow"
+    if skill_name and skill_name.strip():
+        clean_slug = re.sub(r"[^a-z0-9_-]", "", skill_name.lower().strip().replace(" ", "-"))
+    else:
+        clean_slug = re.sub(r"[^a-z0-9_-]", "", goal.lower().replace(" ", "-"))[:25] or "session-workflow"
     body = f"""# {goal.title()} Playbook
 
 ## 🎯 Overview

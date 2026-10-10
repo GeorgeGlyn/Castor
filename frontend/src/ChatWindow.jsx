@@ -552,7 +552,7 @@ const SimpleMarkdownRenderer = ({ content }) => {
 };
 
 // ── Interactive Live Artifact Sandbox (Phase 10) ───────────────────────────
-const LiveArtifactSandbox = ({ artifact, isMaximized, onToggleMaximize }) => {
+const LiveArtifactSandbox = ({ artifact, isMaximized, onToggleMaximize, activeProject }) => {
   const [viewMode, setViewMode] = useState('preview'); // 'preview' | 'code'
   const [device, setDevice] = useState('desktop'); // 'desktop' | 'tablet' | 'mobile'
   const [zoom, setZoom] = useState(100);
@@ -674,8 +674,9 @@ const LiveArtifactSandbox = ({ artifact, isMaximized, onToggleMaximize }) => {
   };
 
   const handleOpenRaw = () => {
+    const projParam = activeProject?.path ? `?project_path=${encodeURIComponent(activeProject.path)}` : '';
     if (artifact.id) {
-      window.open(`http://localhost:8000/api/artifacts/${encodeURIComponent(artifact.id)}/raw`, '_blank');
+      window.open(`http://localhost:8000/api/artifacts/${encodeURIComponent(artifact.id)}/raw${projParam}`, '_blank');
     } else {
       const blob = new Blob([content], { type: isHtml ? 'text/html' : 'text/plain' });
       const url = URL.createObjectURL(blob);
@@ -1102,10 +1103,7 @@ const SidecarDrawer = ({
   };
 
   const handleDistillSubmit = async () => {
-    if (completedSteps.length === 0) {
-      setDistillStatus('No completed steps available to distill.');
-      return;
-    }
+    const rawGoal = distillInitialData?.goal || currentGoal || distillName || 'Task Execution Workflow';
     try {
       setIsDistillLoading(true);
       setDistillStatus('Reflecting with Gemini AI to distill triggers and procedure...');
@@ -1113,16 +1111,17 @@ const SidecarDrawer = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          completed_steps: completedSteps,
-          goal: distillInitialData?.goal || currentGoal || 'Task Execution Workflow',
+          steps: completedSteps.length > 0 ? completedSteps : [rawGoal],
+          completed_steps: completedSteps.length > 0 ? completedSteps : [rawGoal],
+          goal: rawGoal,
           skill_name: distillName.trim() || undefined,
           scope: distillScope,
           project_path: activeProject?.path || null,
         }),
       });
       const data = await res.json();
-      if (data.success) {
-        setDistillStatus(`✨ Playbook "${data.skill?.name}" distilled successfully!`);
+      if (res.ok && data.success) {
+        setDistillStatus(`✨ Playbook "${data.skill?.name || distillName}" distilled successfully!`);
         playSoundCue('success');
         if (setDistillInitialData) setDistillInitialData(null);
         setTimeout(() => {
@@ -1131,7 +1130,8 @@ const SidecarDrawer = ({
         }, 1500);
         await fetchSkills();
       } else {
-        setDistillStatus(`❌ Distillation failed: ${data.message}`);
+        const errMsg = data.message || (Array.isArray(data.detail) ? data.detail.map((d) => d.msg).join(', ') : data.detail) || 'Failed to distill playbook';
+        setDistillStatus(`❌ Distillation failed: ${errMsg}`);
       }
     } catch (err) {
       setDistillStatus(`❌ Error: ${err.message}`);
@@ -1379,6 +1379,7 @@ const SidecarDrawer = ({
                 artifact={current}
                 isMaximized={isMaximized}
                 onToggleMaximize={() => setIsMaximized(!isMaximized)}
+                activeProject={activeProject}
               />
             ) : (
               <div className="flex flex-col items-center justify-center flex-1 text-center text-zinc-500 p-8">
