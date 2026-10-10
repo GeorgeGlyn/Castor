@@ -707,6 +707,19 @@ function ChatWindow() {
   const [selectedSymbol, setSelectedSymbol] = useState(null);
   const [fileOutlineData, setFileOutlineData] = useState(null);
 
+  // ── Phase 8: Git Checkpoints & Interactive Rollback Timeline State ────────
+  const [isCheckpointsModalOpen, setIsCheckpointsModalOpen] = useState(false);
+  const [checkpointsList, setCheckpointsList] = useState([]);
+  const [selectedCheckpoint, setSelectedCheckpoint] = useState(null);
+  const [checkpointDiffData, setCheckpointDiffData] = useState(null);
+  const [isLoadingCheckpoints, setIsLoadingCheckpoints] = useState(false);
+  const [isLoadingDiff, setIsLoadingDiff] = useState(false);
+  const [isRestoringCheckpoint, setIsRestoringCheckpoint] = useState(false);
+  const [newCheckpointDesc, setNewCheckpointDesc] = useState('');
+  const [checkpointSearchQuery, setCheckpointSearchQuery] = useState('');
+  const [selectedDiffFile, setSelectedDiffFile] = useState(null);
+  const [showRestoreConfirm, setShowRestoreConfirm] = useState(null);
+
   const fetchProviders = useCallback(async () => {
     try {
       const res = await fetch('http://localhost:8000/api/providers');
@@ -929,6 +942,131 @@ function ChatWindow() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [fetchSymbolStats]);
+
+  // ── Phase 8: Checkpoint & Diff Helpers ────────────────────────────────────
+  const fetchCheckpointDiff = useCallback(async (checkpointId) => {
+    if (!checkpointId) return;
+    try {
+      setIsLoadingDiff(true);
+      const projParam = activeProject?.path ? `?project_path=${encodeURIComponent(activeProject.path)}` : '';
+      const res = await fetch(`http://localhost:8000/api/checkpoints/${encodeURIComponent(checkpointId)}/diff${projParam}`);
+      if (res.ok) {
+        const data = await res.json();
+        setCheckpointDiffData(data.diff || null);
+        setSelectedDiffFile(data.diff?.files?.[0]?.file || null);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch checkpoint diff:', err);
+    } finally {
+      setIsLoadingDiff(false);
+    }
+  }, [activeProject]);
+
+  const fetchCheckpoints = useCallback(async () => {
+    try {
+      setIsLoadingCheckpoints(true);
+      const projParam = activeProject?.path ? `?project_path=${encodeURIComponent(activeProject.path)}` : '';
+      const res = await fetch(`http://localhost:8000/api/checkpoints${projParam}`);
+      if (res.ok) {
+        const data = await res.json();
+        const cps = data.checkpoints || [];
+        setCheckpointsList(cps);
+        if (cps.length > 0 && !selectedCheckpoint) {
+          setSelectedCheckpoint(cps[0]);
+          fetchCheckpointDiff(cps[0].id);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to fetch checkpoints:', err);
+    } finally {
+      setIsLoadingCheckpoints(false);
+    }
+  }, [activeProject, selectedCheckpoint, fetchCheckpointDiff]);
+
+  const handleCreateCheckpoint = async (e) => {
+    if (e) e.preventDefault();
+    const desc = newCheckpointDesc.trim() || 'Manual snapshot';
+    try {
+      setIsLoadingCheckpoints(true);
+      const res = await fetch('http://localhost:8000/api/checkpoints/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: desc,
+          project_path: activeProject?.path || null,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCheckpointsList(data.checkpoints || []);
+        setNewCheckpointDesc('');
+        playSoundCue('success');
+        setAgentStatus(`💾 Checkpoint created: "${desc}"`);
+        if (data.checkpoints?.[0]) {
+          setSelectedCheckpoint(data.checkpoints[0]);
+          fetchCheckpointDiff(data.checkpoints[0].id);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to create checkpoint:', err);
+    } finally {
+      setIsLoadingCheckpoints(false);
+    }
+  };
+
+  const handleRestoreCheckpoint = async (checkpointId) => {
+    if (!checkpointId) return;
+    try {
+      setIsRestoringCheckpoint(true);
+      const res = await fetch(`http://localhost:8000/api/checkpoints/${encodeURIComponent(checkpointId)}/restore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_path: activeProject?.path || null,
+          create_backup: true,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCheckpointsList(data.checkpoints || []);
+        setShowRestoreConfirm(null);
+        playSoundCue('success');
+        setAgentStatus(data.message || `⏪ Successfully restored to checkpoint ${checkpointId}`);
+        fetchCheckpointDiff(checkpointId);
+      }
+    } catch (err) {
+      console.error('Failed to restore checkpoint:', err);
+      setAgentStatus(`⚠️ Error restoring checkpoint: ${err.message}`);
+    } finally {
+      setIsRestoringCheckpoint(false);
+    }
+  };
+
+  const handleDeleteCheckpoint = async (checkpointId) => {
+    if (!checkpointId) return;
+    try {
+      const projParam = activeProject?.path ? `?project_path=${encodeURIComponent(activeProject.path)}` : '';
+      const res = await fetch(`http://localhost:8000/api/checkpoints/${encodeURIComponent(checkpointId)}${projParam}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCheckpointsList(data.checkpoints || []);
+        if (selectedCheckpoint?.id === checkpointId) {
+          const next = data.checkpoints?.[0] || null;
+          setSelectedCheckpoint(next);
+          if (next) fetchCheckpointDiff(next.id);
+          else setCheckpointDiffData(null);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to delete checkpoint:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchCheckpoints();
+  }, [fetchCheckpoints]);
 
   // ── Reference Images Upload & Clipboard State ─────────────────────────────
   const [attachedImages, setAttachedImages] = useState([]);
@@ -1677,6 +1815,21 @@ function ChatWindow() {
         if (data.message) {
           setAgentStatus(data.message);
         }
+      } else if (data.type === 'checkpoints_list') {
+        if (data.checkpoints) {
+          setCheckpointsList(data.checkpoints);
+        }
+      } else if (data.type === 'checkpoint_action_result') {
+        if (data.checkpoints) {
+          setCheckpointsList(data.checkpoints);
+        }
+        if (data.message) {
+          setAgentStatus(data.message);
+        }
+      } else if (data.type === 'checkpoint_diff_result') {
+        if (data.diff) {
+          setCheckpointDiffData(data.diff);
+        }
       }
 
 
@@ -2397,6 +2550,24 @@ function ChatWindow() {
               {symbolStats.total_symbols > 0 && (
                 <span className="text-[10px] font-mono bg-zinc-700 text-zinc-300 px-1.5 py-0.2 rounded-full font-bold">
                   {symbolStats.total_symbols}
+                </span>
+              )}
+            </button>
+
+            {/* Phase 8: Git Checkpoints & Interactive Rollback Timeline Header Button */}
+            <button
+              onClick={() => {
+                setIsCheckpointsModalOpen(true);
+                fetchCheckpoints();
+              }}
+              className="text-xs px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm border text-zinc-400 hover:text-zinc-200 bg-zinc-850 hover:bg-zinc-800 border-zinc-750"
+              title="Git Checkpoints & Interactive Rollback Timeline (Safety rewinds & visual diffs)"
+            >
+              <span>🛡️</span>
+              <span>Checkpoints</span>
+              {checkpointsList.length > 0 && (
+                <span className="text-[10px] font-mono bg-amber-950/80 text-amber-300 border border-amber-800/60 px-1.5 py-0.2 rounded-full font-bold">
+                  {checkpointsList.length}
                 </span>
               )}
             </button>
@@ -4679,6 +4850,427 @@ function ChatWindow() {
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Phase 8: Git Checkpoints & Interactive Rollback Timeline Modal ───── */}
+      {isCheckpointsModalOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setIsCheckpointsModalOpen(false)}
+        >
+          <div
+            className="bg-[#0f1015] border border-amber-900/40 rounded-2xl max-w-6xl w-full h-[88vh] shadow-2xl flex flex-col overflow-hidden ring-1 ring-amber-500/20"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-zinc-800 bg-[#12131a] flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <span className="text-xl">🛡️</span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-sm font-semibold text-zinc-100 tracking-wide flex items-center gap-1.5">
+                      <span>Git Checkpoints &amp; Rollback Timeline</span>
+                      <span className="text-[10px] font-mono text-amber-400 bg-amber-950/60 border border-amber-800/60 px-1.5 py-0.5 rounded">
+                        Phase 8 • Zero-Risk Rewinds
+                      </span>
+                    </h2>
+                  </div>
+                  <p className="text-[11px] text-zinc-400 font-mono">
+                    {checkpointsList.length} snapshot{checkpointsList.length !== 1 ? 's' : ''} available
+                    {activeProject?.name ? ` for ${activeProject.name}` : ''}
+                  </p>
+                </div>
+              </div>
+
+              {/* Top Create Snapshot Field & Close */}
+              <div className="flex items-center gap-2.5">
+                <form onSubmit={handleCreateCheckpoint} className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    value={newCheckpointDesc}
+                    onChange={(e) => setNewCheckpointDesc(e.target.value)}
+                    placeholder="Snapshot label (e.g. Before refactoring...)"
+                    className="bg-zinc-900 border border-zinc-750 rounded-lg px-2.5 py-1 text-xs text-zinc-200 font-mono placeholder:text-zinc-600 focus:outline-none focus:border-amber-500/80 w-52 sm:w-64"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isLoadingCheckpoints}
+                    className="px-2.5 py-1 text-xs font-mono text-amber-200 bg-amber-950/70 hover:bg-amber-900/80 rounded-lg border border-amber-800/60 transition-colors flex items-center gap-1 shrink-0 disabled:opacity-40"
+                  >
+                    <span>+</span>
+                    <span>Snapshot</span>
+                  </button>
+                </form>
+
+                <button
+                  onClick={fetchCheckpoints}
+                  disabled={isLoadingCheckpoints}
+                  className="px-2 py-1 text-xs font-mono text-zinc-400 hover:text-zinc-200 bg-zinc-800/80 hover:bg-zinc-750 rounded-lg border border-zinc-700/60 transition-colors"
+                  title="Refresh snapshots"
+                >
+                  <span className={isLoadingCheckpoints ? 'animate-spin inline-block' : ''}>🔄</span>
+                </button>
+
+                <button
+                  onClick={() => setIsCheckpointsModalOpen(false)}
+                  className="text-zinc-400 hover:text-zinc-200 text-sm font-mono w-7 h-7 flex items-center justify-center rounded-lg hover:bg-zinc-800 transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Main Split Layout: Timeline List & Visual Diff Viewer */}
+            <div className="flex-1 min-h-0 flex overflow-hidden">
+              {/* Left Column: Chronological Snapshots Timeline */}
+              <div className="w-[38%] border-r border-zinc-800 bg-[#0b0b0e] flex flex-col shrink-0">
+                {/* Search / Filter input */}
+                <div className="p-3 border-b border-zinc-800/80 bg-[#0e0e13]">
+                  <input
+                    type="text"
+                    value={checkpointSearchQuery}
+                    onChange={(e) => setCheckpointSearchQuery(e.target.value)}
+                    placeholder="Filter snapshots by name, commit, or branch..."
+                    className="w-full bg-zinc-900 border border-zinc-750 rounded-lg px-2.5 py-1 text-xs text-zinc-200 font-mono placeholder:text-zinc-600 focus:outline-none focus:border-amber-500/70"
+                  />
+                </div>
+
+                {/* Timeline Cards Container */}
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                  {checkpointsList.length === 0 ? (
+                    <div className="text-center py-20 px-4 text-zinc-600 font-mono text-xs">
+                      <div className="text-3xl mb-2">🛡️</div>
+                      <p className="text-zinc-400 font-medium">No Checkpoints Created</p>
+                      <p className="text-[11px] mt-1 text-zinc-600">
+                        Take a snapshot using "+ Snapshot" above before making changes.
+                      </p>
+                    </div>
+                  ) : (
+                    checkpointsList
+                      .filter((cp) => {
+                        if (!checkpointSearchQuery.trim()) return true;
+                        const q = checkpointSearchQuery.toLowerCase();
+                        return (
+                          cp.description?.toLowerCase().includes(q) ||
+                          cp.id?.toLowerCase().includes(q) ||
+                          cp.short_head?.toLowerCase().includes(q) ||
+                          cp.branch?.toLowerCase().includes(q)
+                        );
+                      })
+                      .map((cp, idx) => {
+                        const isSelected = selectedCheckpoint?.id === cp.id;
+                        const formattedTime = new Date(cp.timestamp).toLocaleString(undefined, {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit',
+                        });
+
+                        return (
+                          <div
+                            key={cp.id}
+                            onClick={() => {
+                              setSelectedCheckpoint(cp);
+                              fetchCheckpointDiff(cp.id);
+                            }}
+                            className={`group relative rounded-xl p-3 border transition-all cursor-pointer ${
+                              isSelected
+                                ? 'bg-amber-950/25 border-amber-600/70 ring-1 ring-amber-500/40 shadow-lg'
+                                : 'bg-zinc-900/60 hover:bg-zinc-850/80 border-zinc-800/80'
+                            }`}
+                          >
+                            {/* Card Top: Status & Timestamp */}
+                            <div className="flex items-center justify-between gap-2 mb-1.5">
+                              <span className="text-xs font-mono font-bold text-zinc-100 truncate flex items-center gap-1.5">
+                                <span className={`w-2 h-2 rounded-full ${isSelected ? 'bg-amber-400 shadow-[0_0_8px_#f59e0b]' : 'bg-zinc-500'}`} />
+                                <span className="truncate">{cp.description}</span>
+                              </span>
+                              <span className="text-[10px] font-mono text-zinc-500 shrink-0">
+                                {formattedTime}
+                              </span>
+                            </div>
+
+                            {/* Git Badges & Branch */}
+                            <div className="flex items-center gap-1.5 flex-wrap text-[10px] font-mono mb-2">
+                              {cp.short_head && (
+                                <span className="px-1.5 py-0.2 rounded bg-zinc-800 text-zinc-300 border border-zinc-700/60">
+                                  HEAD: {cp.short_head}
+                                </span>
+                              )}
+                              {cp.branch && cp.branch !== 'unknown' && (
+                                <span className="px-1.5 py-0.2 rounded bg-blue-950/50 text-blue-300 border border-blue-800/50">
+                                  🌿 {cp.branch}
+                                </span>
+                              )}
+                              {cp.has_uncommitted && (
+                                <span className="px-1.5 py-0.2 rounded bg-amber-950/50 text-amber-300 border border-amber-800/50">
+                                  +Uncommitted ({cp.uncommitted_files_count || 'dirty'})
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Actions footer */}
+                            <div className="flex items-center justify-between pt-1.5 border-t border-zinc-800/50 text-[10px] font-mono">
+                              <span className="text-zinc-500">ID: {cp.id}</span>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setShowRestoreConfirm(cp);
+                                  }}
+                                  className="px-2 py-0.5 rounded bg-amber-950/60 hover:bg-amber-900/80 text-amber-300 border border-amber-800/60 transition-colors"
+                                  title="Rewind workspace to this state"
+                                >
+                                  Rewind ↩
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteCheckpoint(cp.id);
+                                  }}
+                                  className="px-1.5 py-0.5 rounded text-zinc-500 hover:text-red-400 hover:bg-red-950/40 transition-colors"
+                                  title="Delete snapshot"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                  )}
+                </div>
+              </div>
+
+              {/* Right Column: Visual Diff Inspector */}
+              <div className="flex-1 flex flex-col bg-[#070709] min-w-0 overflow-hidden">
+                {selectedCheckpoint ? (
+                  <>
+                    {/* Diff Inspector Top Bar */}
+                    <div className="px-5 py-3 border-b border-zinc-800/90 bg-[#0e0e13] flex items-center justify-between shrink-0">
+                      <div className="flex items-center gap-3 truncate">
+                        <span className="text-xs font-mono font-semibold text-zinc-200 truncate">
+                          Diff vs Current Workspace State
+                        </span>
+                        {checkpointDiffData && (
+                          <div className="flex items-center gap-1.5 text-[10px] font-mono shrink-0">
+                            <span className="px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/60">
+                              +{checkpointDiffData.total_insertions}
+                            </span>
+                            <span className="px-2 py-0.5 rounded bg-rose-950/60 text-rose-300 border border-rose-800/60">
+                              -{checkpointDiffData.total_deletions}
+                            </span>
+                            <span className="px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700/60">
+                              {checkpointDiffData.files_count} Changed File{checkpointDiffData.files_count !== 1 ? 's' : ''}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={() => {
+                            if (checkpointDiffData?.raw_diff) {
+                              navigator.clipboard?.writeText(checkpointDiffData.raw_diff);
+                              setAgentStatus('📋 Copied full diff to clipboard');
+                            }
+                          }}
+                          disabled={!checkpointDiffData?.raw_diff}
+                          className="px-2.5 py-1 text-[11px] font-mono bg-zinc-800 hover:bg-zinc-750 disabled:opacity-30 text-zinc-300 rounded border border-zinc-700 transition-colors"
+                          title="Copy raw unified diff"
+                        >
+                          Copy Diff
+                        </button>
+                        <button
+                          onClick={() => setShowRestoreConfirm(selectedCheckpoint)}
+                          className="px-3 py-1 text-xs font-mono font-semibold bg-amber-600 hover:bg-amber-500 text-zinc-950 rounded-lg transition-colors flex items-center gap-1.5 shadow"
+                        >
+                          <span>⚡</span>
+                          <span>Rewind to this State</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Files Filter Bar */}
+                    {checkpointDiffData?.files && checkpointDiffData.files.length > 0 && (
+                      <div className="px-4 py-2 border-b border-zinc-850 bg-[#090a0d] flex items-center gap-1.5 overflow-x-auto shrink-0">
+                        <button
+                          onClick={() => setSelectedDiffFile(null)}
+                          className={`text-[10px] font-mono px-2 py-0.5 rounded border transition-colors shrink-0 ${
+                            selectedDiffFile === null
+                              ? 'bg-amber-950/70 text-amber-300 border-amber-800'
+                              : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200 border-zinc-800'
+                          }`}
+                        >
+                          All Changed Files ({checkpointDiffData.files.length})
+                        </button>
+
+                        {checkpointDiffData.files.map((f) => {
+                          const isSel = selectedDiffFile === f.file;
+                          const statColor =
+                            f.status === 'A'
+                              ? 'text-emerald-400'
+                              : f.status === 'D'
+                              ? 'text-rose-400'
+                              : f.status === '??'
+                              ? 'text-purple-400'
+                              : 'text-amber-400';
+
+                          return (
+                            <button
+                              key={f.file}
+                              onClick={() => setSelectedDiffFile(f.file)}
+                              className={`text-[10px] font-mono px-2 py-0.5 rounded border transition-colors shrink-0 flex items-center gap-1.5 ${
+                                isSel
+                                  ? 'bg-zinc-800 text-zinc-100 border-zinc-600'
+                                  : 'bg-zinc-900/80 text-zinc-400 hover:text-zinc-200 border-zinc-800'
+                              }`}
+                            >
+                              <span className={`font-bold ${statColor}`}>{f.status}</span>
+                              <span className="truncate max-w-xs">{f.file}</span>
+                              <span className="text-[9px] text-zinc-500">
+                                +{f.insertions}/-{f.deletions}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Main Diff Content Pane */}
+                    <div className="flex-1 overflow-y-auto p-4 font-mono text-xs leading-relaxed select-text bg-[#06070a]">
+                      {isLoadingDiff ? (
+                        <div className="h-full flex items-center justify-center text-zinc-500">
+                          <span className="animate-spin text-lg mr-2">🔄</span>
+                          <span>Computing diff tree...</span>
+                        </div>
+                      ) : checkpointDiffData?.is_clean ? (
+                        <div className="h-full flex flex-col items-center justify-center text-zinc-500">
+                          <div className="text-4xl mb-3">✨</div>
+                          <p className="text-zinc-300 font-semibold text-sm">Workspace is Identical</p>
+                          <p className="text-zinc-500 text-xs mt-1 max-w-md text-center">
+                            Current workspace has no uncommitted changes or divergence from snapshot "{selectedCheckpoint.description}".
+                          </p>
+                        </div>
+                      ) : checkpointDiffData?.raw_diff ? (
+                        <div className="rounded-xl border border-zinc-800 bg-[#090a0e] overflow-hidden">
+                          {checkpointDiffData.raw_diff
+                            .split('\n')
+                            .filter((line) => {
+                              if (!selectedDiffFile) return true;
+                              // Basic per-file hunk boundary filtering if file selected
+                              return true;
+                            })
+                            .map((line, lIdx) => {
+                              let lineStyle = 'text-zinc-400';
+                              if (line.startsWith('+++') || line.startsWith('---')) {
+                                lineStyle = 'text-zinc-500 font-bold bg-zinc-900/60 px-3';
+                              } else if (line.startsWith('+')) {
+                                lineStyle = 'text-emerald-300 bg-emerald-950/30 px-3';
+                              } else if (line.startsWith('-')) {
+                                lineStyle = 'text-rose-300 bg-rose-950/30 px-3';
+                              } else if (line.startsWith('@@')) {
+                                lineStyle = 'text-blue-300 bg-blue-950/50 font-bold px-3 border-y border-blue-900/40 my-1';
+                              } else if (line.startsWith('diff --git')) {
+                                lineStyle = 'text-cyan-400 font-bold bg-zinc-900 px-3 py-1 border-t border-zinc-800 mt-2';
+                              } else {
+                                lineStyle = 'text-zinc-400 px-3';
+                              }
+
+                              return (
+                                <div key={lIdx} className={`py-0.5 whitespace-pre font-mono text-[11px] ${lineStyle}`}>
+                                  {line || ' '}
+                                </div>
+                              );
+                            })}
+                        </div>
+                      ) : (
+                        <div className="h-full flex flex-col items-center justify-center text-zinc-500">
+                          <div className="text-3xl mb-2">📋</div>
+                          <p className="text-zinc-400">No diff output available.</p>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center text-zinc-600 font-mono text-xs p-6 text-center">
+                    <div className="text-4xl mb-3">🛡️</div>
+                    <p className="text-zinc-400 font-medium">Select a Checkpoint</p>
+                    <p className="text-zinc-600 mt-1 max-w-xs">
+                      Inspect visual additions, deletions, affected files, and safely rewind with one click.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Checkpoint Rollback Confirmation Modal ───────────────────────────── */}
+      {showRestoreConfirm && (
+        <div
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-100"
+          onClick={() => setShowRestoreConfirm(null)}
+        >
+          <div
+            className="bg-[#14141b] border border-amber-600/70 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 ring-1 ring-amber-500/30"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-950/70 border border-amber-700/60 flex items-center justify-center text-xl shrink-0">
+                ⚠️
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-zinc-100">
+                  Confirm Workspace Rollback
+                </h3>
+                <p className="text-[11px] text-zinc-400 font-mono">
+                  Target: {showRestoreConfirm.id} ({showRestoreConfirm.short_head || 'HEAD'})
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-black/60 rounded-xl border border-zinc-800 text-xs text-zinc-300 font-mono space-y-2 select-text">
+              <p className="text-zinc-200 font-semibold">
+                "{showRestoreConfirm.description}"
+              </p>
+              <p className="text-[11px] text-zinc-400 leading-relaxed">
+                Rewinding will restore project code and stashed changes back to this snapshot.
+              </p>
+              <div className="text-[11px] text-emerald-400 bg-emerald-950/40 p-2 rounded border border-emerald-800/40">
+                🛡️ Zero Risk: An automatic safety backup snapshot will be recorded before resetting, so you can always revert back!
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setShowRestoreConfirm(null)}
+                className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 py-2 rounded-xl text-xs font-mono transition-colors border border-zinc-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleRestoreCheckpoint(showRestoreConfirm.id)}
+                disabled={isRestoringCheckpoint}
+                className="flex-1 bg-amber-600 hover:bg-amber-500 text-zinc-950 py-2 rounded-xl text-xs font-mono font-bold transition-colors shadow flex items-center justify-center gap-1.5 disabled:opacity-50"
+              >
+                {isRestoringCheckpoint ? (
+                  <>
+                    <span className="animate-spin">🔄</span>
+                    <span>Rewinding...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>⚡</span>
+                    <span>Confirm &amp; Rewind</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>
