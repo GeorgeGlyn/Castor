@@ -44,6 +44,10 @@ def resolve_path(path: str, cwd: Optional[str] = None) -> str:
     return os.path.normpath(os.path.abspath(clean_path))
 
 
+# Compatibility alias
+_resolve_path = resolve_path
+
+
 def view_file(
     path: str,
     start_line: Optional[int] = None,

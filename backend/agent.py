@@ -1903,7 +1903,7 @@ class AgentLoop:
                                     "diff": diff_info,
                                 })
                             # Phase 9: Real-Time Diagnostic Lint Verification
-                            resolved_p = dev_tools._resolve_path(f_path, self.current_project_path)
+                            resolved_p = dev_tools.resolve_path(f_path, self.current_project_path)
                             diag_issues = diagnostic_engine.check_file(resolved_p, self.current_project_path)
                             diag_errs = [i for i in diag_issues if i.severity == "error"]
                             if diag_errs:
@@ -1955,7 +1955,7 @@ class AgentLoop:
                                     "diff": diff_info,
                                 })
                             # Phase 9: Real-Time Diagnostic Lint Verification
-                            resolved_p = dev_tools._resolve_path(f_path, self.current_project_path)
+                            resolved_p = dev_tools.resolve_path(f_path, self.current_project_path)
                             diag_issues = diagnostic_engine.check_file(resolved_p, self.current_project_path)
                             diag_errs = [i for i in diag_issues if i.severity == "error"]
                             if diag_errs:
@@ -2053,7 +2053,7 @@ class AgentLoop:
                                     "diff": diff_info,
                                 })
                             # Phase 9: Real-Time Diagnostic Lint Verification
-                            resolved_p = dev_tools._resolve_path(f_path, self.current_project_path)
+                            resolved_p = dev_tools.resolve_path(f_path, self.current_project_path)
                             diag_issues = diagnostic_engine.check_file(resolved_p, self.current_project_path)
                             diag_errs = [i for i in diag_issues if i.severity == "error"]
                             if diag_errs:
