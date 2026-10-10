@@ -91,10 +91,16 @@ async def get_project_artifact(artifact_id: str, project_path: Optional[str] = N
 @router.get("/api/providers")
 async def list_providers():
     ollama_online = await model_manager.check_ollama_health()
-    providers = model_manager.get_available_providers()
+    ollama_models = []
+    if ollama_online:
+        ollama_models = await model_manager.get_ollama_local_models()
+    providers = model_manager.get_available_providers(ollama_models=ollama_models)
     for p in providers:
         if p.id == "ollama":
             p.is_available = ollama_online
+            if ollama_models and model_manager.ollama_model not in ollama_models:
+                model_manager.ollama_model = ollama_models[0]
+                p.active_model = ollama_models[0]
     return {
         "providers": [p.model_dump() for p in providers],
         "active_provider": model_manager.active_provider,
@@ -114,7 +120,9 @@ async def select_provider(req: SetProviderRequest):
 
     if req.model:
         os.environ["PLANNER_MODEL"] = req.model
-        if p_id == "ollama":
+        if p_id == "gemini":
+            model_manager.gemini_model = req.model
+        elif p_id == "ollama":
             model_manager.ollama_model = req.model
         elif p_id == "deepseek":
             model_manager.deepseek_model = req.model

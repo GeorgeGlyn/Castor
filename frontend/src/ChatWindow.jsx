@@ -1935,25 +1935,21 @@ function ChatWindow() {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Multi-Provider AI Engine Selector Badge */}
+            {/* Multi-Provider AI Engine & Model Selector Badge */}
             <button
               onClick={() => {
                 fetchProviders();
                 setIsCustomAgentModalOpen(true);
               }}
               className="text-xs px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm border bg-zinc-850 hover:bg-zinc-800 text-zinc-300 hover:text-white border-zinc-750 hover:border-blue-500/50 cursor-pointer"
-              title="Active AI Model Engine (Click to configure or switch between Gemini, Ollama Local Offline, DeepSeek, OpenAI, Claude)"
+              title="Active AI Engine & Model (Click to configure or switch models/providers)"
             >
               <span className="text-xs">
                 {activeProvider === 'ollama' ? '🦙' : activeProvider === 'deepseek' ? '🌐' : activeProvider === 'openai' ? '🤖' : activeProvider === 'anthropic' ? '🧠' : activeProvider === 'openrouter' ? '🔀' : '⚡'}
               </span>
               <span className="font-medium capitalize">{activeProvider}</span>
               <span className="text-[10px] text-zinc-400 font-mono hidden sm:inline">
-                {activeProvider === 'ollama'
-                  ? (availableProviders.find((p) => p.id === 'ollama')?.is_available ? '• Online' : '• Offline')
-                  : activeProvider === 'gemini'
-                  ? 'Pool'
-                  : (availableProviders.find((p) => p.id === activeProvider)?.default_model || '')}
+                ({availableProviders.find((p) => p.id === activeProvider)?.active_model || 'active'})
               </span>
             </button>
 
@@ -3284,8 +3280,11 @@ function ChatWindow() {
                         </p>
 
                         <div className="flex items-center justify-between pt-1 border-t border-zinc-750/40">
-                          <span className="text-[10px] text-zinc-400 font-mono bg-zinc-800/80 px-1.5 py-0.5 rounded">
-                            {prov.badge}
+                          <span
+                            className="text-[10px] text-zinc-300 font-mono bg-zinc-800/90 px-1.5 py-0.5 rounded border border-zinc-700/60 truncate max-w-[140px]"
+                            title={provInfo?.active_model || prov.badge}
+                          >
+                            🎯 {provInfo?.active_model || prov.badge}
                           </span>
                           {prov.id === 'ollama' ? (
                             <span
@@ -3309,84 +3308,127 @@ function ChatWindow() {
                   })}
                 </div>
 
-                {/* Inline Parameters Override for Active Non-Gemini Provider */}
-                {activeProvider !== 'gemini' && (
-                  <div className="mt-3 p-3 bg-zinc-900/80 border border-zinc-800 rounded-xl space-y-2.5 animate-in fade-in">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-semibold text-zinc-300">
-                        ⚙️ Configure {activeProvider.toUpperCase()} Parameters
-                      </span>
-                      <span className="text-[10px] font-mono text-zinc-500">
-                        Optional override settings
-                      </span>
-                    </div>
+                {/* Active Provider Model Selection & Engine Parameters */}
+                {(() => {
+                  const currentProvInfo = availableProviders.find((p) => p.id === activeProvider);
+                  const currentModels = currentProvInfo?.models || [];
+                  const activeModelName = currentProvInfo?.active_model || '';
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[10px] text-zinc-400 block mb-1">Model Name:</label>
-                        <input
-                          type="text"
-                          value={providerModelInput}
-                          onChange={(e) => setProviderModelInput(e.target.value)}
-                          placeholder={
-                            activeProvider === 'ollama'
-                              ? 'qwen2.5-coder:14b'
-                              : activeProvider === 'deepseek'
-                              ? 'deepseek-chat'
-                              : activeProvider === 'openai'
-                              ? 'gpt-4o'
-                              : activeProvider === 'anthropic'
-                              ? 'claude-3-7-sonnet-20250219'
-                              : 'model-identifier'
-                          }
-                          className="w-full bg-[#121216] border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500"
-                        />
+                  return (
+                    <div className="mt-3 p-3.5 bg-zinc-900/90 border border-zinc-800 rounded-xl space-y-3 animate-in fade-in">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                          <span>🎯</span>
+                          <span>Active Model for {activeProvider.toUpperCase()}:</span>
+                          <span className="text-blue-400 font-mono font-medium">
+                            {activeModelName || 'Default'}
+                          </span>
+                        </span>
+                        <span className="text-[10px] font-mono text-zinc-500">
+                          {currentModels.length} models cataloged
+                        </span>
                       </div>
 
-                      {activeProvider === 'ollama' ? (
+                      {/* Quick Model Selector Chips */}
+                      {currentModels.length > 0 && (
                         <div>
-                          <label className="text-[10px] text-zinc-400 block mb-1">Daemon Base URL:</label>
-                          <input
-                            type="text"
-                            value={providerBaseUrlInput}
-                            onChange={(e) => setProviderBaseUrlInput(e.target.value)}
-                            placeholder="http://localhost:11434/v1"
-                            className="w-full bg-[#121216] border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500"
-                          />
-                        </div>
-                      ) : (
-                        <div>
-                          <label className="text-[10px] text-zinc-400 block mb-1">API Key (Optional override):</label>
-                          <input
-                            type="password"
-                            value={providerApiKeyInput}
-                            onChange={(e) => setProviderApiKeyInput(e.target.value)}
-                            placeholder="Enter API Key to override .env"
-                            className="w-full bg-[#121216] border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500"
-                          />
+                          <label className="text-[10px] text-zinc-400 block mb-1.5">
+                            Select Model (Click to switch):
+                          </label>
+                          <div className="flex flex-wrap gap-1.5">
+                            {currentModels.map((m) => {
+                              const isCurrent = activeModelName === m;
+                              return (
+                                <button
+                                  key={m}
+                                  type="button"
+                                  onClick={() => handleSelectProvider(activeProvider, m)}
+                                  className={`text-[11px] px-2.5 py-1 rounded-lg border transition-all flex items-center gap-1 ${
+                                    isCurrent
+                                      ? 'bg-blue-600 text-white border-blue-500 font-semibold shadow-sm'
+                                      : 'bg-zinc-800/80 hover:bg-zinc-750 text-zinc-300 hover:text-white border-zinc-700/80'
+                                  }`}
+                                >
+                                  <span>{isCurrent ? '✓' : '•'}</span>
+                                  <span className="font-mono">{m}</span>
+                                  {activeProvider === 'ollama' && m === 'qwen2.5:3b' && (
+                                    <span className="text-[9px] px-1 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                      Installed
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
                       )}
-                    </div>
 
-                    <div className="flex justify-end pt-1">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleSelectProvider(
-                            activeProvider,
-                            providerModelInput.trim(),
-                            providerApiKeyInput.trim(),
-                            providerBaseUrlInput.trim()
-                          )
-                        }
-                        disabled={isUpdatingProvider}
-                        className="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-xs font-medium border border-zinc-700 transition-colors"
-                      >
-                        {isUpdatingProvider ? 'Saving...' : 'Apply Engine Overrides'}
-                      </button>
+                      {/* Custom Model ID & Connection Overrides */}
+                      <div className="pt-2 border-t border-zinc-800/60 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="text-[10px] text-zinc-400 block mb-1">
+                            Custom / Unlisted Model ID:
+                          </label>
+                          <input
+                            type="text"
+                            value={providerModelInput}
+                            onChange={(e) => setProviderModelInput(e.target.value)}
+                            placeholder={activeModelName || 'Type model identifier...'}
+                            className="w-full bg-[#121216] border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500 font-mono"
+                          />
+                        </div>
+
+                        {activeProvider === 'ollama' ? (
+                          <div>
+                            <label className="text-[10px] text-zinc-400 block mb-1">Daemon Base URL:</label>
+                            <input
+                              type="text"
+                              value={providerBaseUrlInput}
+                              onChange={(e) => setProviderBaseUrlInput(e.target.value)}
+                              placeholder="http://localhost:11434/v1"
+                              className="w-full bg-[#121216] border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500 font-mono"
+                            />
+                          </div>
+                        ) : activeProvider !== 'gemini' ? (
+                          <div>
+                            <label className="text-[10px] text-zinc-400 block mb-1">API Key Override (Optional):</label>
+                            <input
+                              type="password"
+                              value={providerApiKeyInput}
+                              onChange={(e) => setProviderApiKeyInput(e.target.value)}
+                              placeholder="Enter API Key to override .env"
+                              className="w-full bg-[#121216] border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500 font-mono"
+                            />
+                          </div>
+                        ) : (
+                          <div className="flex items-end pb-1.5">
+                            <span className="text-[10px] text-zinc-500">
+                              Gemini uses your multi-key failover pool.
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex justify-end pt-1">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleSelectProvider(
+                              activeProvider,
+                              providerModelInput.trim() || undefined,
+                              providerApiKeyInput.trim() || undefined,
+                              providerBaseUrlInput.trim() || undefined
+                            )
+                          }
+                          disabled={isUpdatingProvider}
+                          className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors"
+                        >
+                          {isUpdatingProvider ? 'Updating...' : 'Apply Model & Overrides'}
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
 
               {/* Section 2: Preset Chips */}

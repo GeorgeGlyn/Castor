@@ -1353,10 +1353,11 @@ class AgentLoop:
                             await self.send_status(f"⚠️ Provider '{active_prov}' unavailable ({prov_err}). Falling back to Gemini Pool...")
 
                     # Default: Multi-Key Gemini Cloud Failover Pool
-                    await self.send_status(f"🧠 Consulting Gemini ({self.planner_model}) with screen state...")
+                    gemini_target_model = getattr(model_manager, "gemini_model", None) or self.planner_model
+                    await self.send_status(f"🧠 Consulting Gemini ({gemini_target_model}) with screen state...")
                     def run_gemini():
                         return self.generate_content_with_fallback(
-                            primary_model=self.planner_model,
+                            primary_model=gemini_target_model,
                             contents=current_history,
                             config=types.GenerateContentConfig(
                                 system_instruction=current_instruction,

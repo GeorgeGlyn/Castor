@@ -31,7 +31,24 @@ class ModelProviderInfo(BaseModel):
     is_available: bool
     is_local: bool
     default_model: str
+    active_model: str
+    models: List[str]
     base_url: Optional[str] = None
+
+
+DEFAULT_MODEL_CATALOG: Dict[str, List[str]] = {
+    "gemini": ["gemini-3.7-pro-preview", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite"],
+    "ollama": ["qwen2.5:3b", "qwen2.5-coder:14b", "llama3.2-vision:11b", "deepseek-r1:8b"],
+    "deepseek": ["deepseek-chat", "deepseek-reasoner"],
+    "openai": ["gpt-4o", "gpt-4o-mini", "o3-mini", "o1"],
+    "anthropic": ["claude-3-7-sonnet-20250219", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"],
+    "openrouter": [
+        "anthropic/claude-3.7-sonnet",
+        "deepseek/deepseek-r1",
+        "meta-llama/llama-3.3-70b-instruct",
+        "google/gemini-2.5-pro-preview",
+    ],
+}
 
 
 class ModelManager:
@@ -41,6 +58,8 @@ class ModelManager:
     def reload_config(self):
         """Reload provider configurations from environment variables."""
         self.active_provider = os.getenv("ACTIVE_PROVIDER", "gemini").lower()
+        self.gemini_model = os.getenv("GEMINI_MODEL", os.getenv("PLANNER_MODEL", "gemini-2.5-flash"))
+
         self.openai_api_key = os.getenv("OPENAI_API_KEY", "")
         self.openai_base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
         self.openai_model = os.getenv("OPENAI_MODEL", "gpt-4o")
@@ -50,7 +69,7 @@ class ModelManager:
         self.deepseek_model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
         self.ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
-        self.ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:14b")
+        self.ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
 
         self.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY", "")
         self.anthropic_base_url = os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1")
@@ -60,22 +79,52 @@ class ModelManager:
         self.openrouter_base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
         self.openrouter_model = os.getenv("OPENROUTER_MODEL", "anthropic/claude-3.7-sonnet")
 
-    def get_available_providers(self) -> List[ModelProviderInfo]:
-        """Returns catalog of configured providers and their availability."""
+    async def get_ollama_local_models(self) -> List[str]:
+        """Query local Ollama server tags to find downloaded models on user's machine."""
+        def _fetch():
+            try:
+                url = self.ollama_base_url.replace("/v1", "/api/tags")
+                req = urllib.request.Request(url, headers={"User-Agent": "Castor/1.0"})
+                with urllib.request.urlopen(req, timeout=1.5) as resp:
+                    data = json.loads(resp.read().decode())
+                    return [m["name"] for m in data.get("models", [])]
+            except Exception:
+                return []
+        return await asyncio.to_thread(_fetch)
+
+    def get_available_providers(self, ollama_models: Optional[List[str]] = None) -> List[ModelProviderInfo]:
+        """Returns catalog of configured providers, their availability, and supported models."""
+        ollama_model_list = list(ollama_models or [])
+        for m in DEFAULT_MODEL_CATALOG["ollama"]:
+            if m not in ollama_model_list:
+                ollama_model_list.append(m)
+        if self.ollama_model not in ollama_model_list:
+            ollama_model_list.insert(0, self.ollama_model)
+
+        def _build_models(prov_id: str, active_m: str) -> List[str]:
+            catalog = list(DEFAULT_MODEL_CATALOG.get(prov_id, []))
+            if active_m and active_m not in catalog:
+                catalog.insert(0, active_m)
+            return catalog
+
         providers = [
             ModelProviderInfo(
                 id="gemini",
                 name="Google Gemini (Cloud Multi-Key Pool)",
                 is_available=bool(os.getenv("GEMINI_API_KEY") or gemini_pool.api_keys),
                 is_local=False,
-                default_model=os.getenv("PLANNER_MODEL", "gemini-3.7-flash"),
+                default_model="gemini-2.5-flash",
+                active_model=self.gemini_model,
+                models=_build_models("gemini", self.gemini_model),
             ),
             ModelProviderInfo(
                 id="ollama",
                 name="Ollama (Local Offline Zero-Cloud)",
-                is_available=True,  # Will test endpoint connectivity on request
+                is_available=True,
                 is_local=True,
                 default_model=self.ollama_model,
+                active_model=self.ollama_model,
+                models=ollama_model_list,
                 base_url=self.ollama_base_url,
             ),
             ModelProviderInfo(
@@ -83,7 +132,9 @@ class ModelManager:
                 name="DeepSeek API (V3 / R1)",
                 is_available=bool(self.deepseek_api_key),
                 is_local=False,
-                default_model=self.deepseek_model,
+                default_model="deepseek-chat",
+                active_model=self.deepseek_model,
+                models=_build_models("deepseek", self.deepseek_model),
                 base_url=self.deepseek_base_url,
             ),
             ModelProviderInfo(
@@ -91,7 +142,9 @@ class ModelManager:
                 name="OpenAI (GPT-4o / o3)",
                 is_available=bool(self.openai_api_key),
                 is_local=False,
-                default_model=self.openai_model,
+                default_model="gpt-4o",
+                active_model=self.openai_model,
+                models=_build_models("openai", self.openai_model),
                 base_url=self.openai_base_url,
             ),
             ModelProviderInfo(
@@ -99,7 +152,9 @@ class ModelManager:
                 name="Anthropic Claude (3.7 / 3.5 Sonnet)",
                 is_available=bool(self.anthropic_api_key),
                 is_local=False,
-                default_model=self.anthropic_model,
+                default_model="claude-3-7-sonnet-20250219",
+                active_model=self.anthropic_model,
+                models=_build_models("anthropic", self.anthropic_model),
                 base_url=self.anthropic_base_url,
             ),
             ModelProviderInfo(
@@ -107,7 +162,9 @@ class ModelManager:
                 name="OpenRouter (Universal Frontier Gateway)",
                 is_available=bool(self.openrouter_api_key),
                 is_local=False,
-                default_model=self.openrouter_model,
+                default_model="anthropic/claude-3.7-sonnet",
+                active_model=self.openrouter_model,
+                models=_build_models("openrouter", self.openrouter_model),
                 base_url=self.openrouter_base_url,
             ),
         ]
