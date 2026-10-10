@@ -867,7 +867,17 @@ const LiveArtifactSandbox = ({ artifact, isMaximized, onToggleMaximize }) => {
               </div>
             ) : isMarkdown ? (
               <div className="flex-1 overflow-y-auto p-5 bg-[#0d0d12]">
-                <SimpleMarkdownRenderer content={content} />
+                {content && content.trim() ? (
+                  <SimpleMarkdownRenderer content={content} />
+                ) : (
+                  <div className="flex flex-col items-center justify-center min-h-[300px] text-center text-zinc-500 py-12">
+                    <span className="text-3xl mb-3">📝</span>
+                    <p className="text-sm font-medium text-zinc-300">Draft Document</p>
+                    <p className="text-xs text-zinc-500 max-w-sm mt-1">
+                      This artifact is currently being drafted or initialized. Once populated by the agent, the living document will render here.
+                    </p>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="flex-1 overflow-y-auto p-4 bg-[#09090d] font-mono text-xs text-zinc-300">

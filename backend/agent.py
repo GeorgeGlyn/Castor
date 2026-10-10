@@ -976,10 +976,11 @@ class AgentLoop:
                 "2. You may use read-only inspection tools: 'view_file', 'list_dir', 'grep_search', 'search_web', 'read_url_content'.\n"
                 "3. ABSOLUTE PROHIBITION: DO NOT modify any code or files ('write_to_file', 'replace_file_content', 'multi_replace_file_content') and DO NOT perform any mouse clicks/drags or UI automation!\n"
                 "4. You MUST formulate a detailed implementation plan:\n"
-                "   - Create a comprehensive project plan artifact using 'create_artifact' (title: 'Implementation Plan', artifact_type: 'markdown'). Include architecture details, files to create/edit, and verification criteria.\n"
+                "   - Create a comprehensive project plan artifact using 'create_artifact' (artifact_title='Implementation Plan', artifact_type='markdown', content='<FULL DETAILED MARKDOWN PLAN>'). "
+                "CRITICAL: You MUST write the FULL architecture and implementation details inside the 'content' argument! DO NOT leave 'content' empty or null!\n"
                 "   - Define clear, sequential, numbered milestones in your scratchpad 'tasks' (e.g. '1. Add button component', '2. Implement state handler', '3. Run test verification').\n"
-                "   - In 'message_to_user', provide an executive summary of the plan, the exact files you plan to touch, and tell the user they can review the tasks, customize them if needed, and click 'Proceed with Plan' to begin execution.\n"
-                "5. Conclude your planning session by emitting action 'done'. Do NOT proceed to implementation yourself.\n"
+                "   - In 'message_to_user', provide a clear executive summary of the plan, the exact files you plan to touch, and tell the user they can review the tasks, customize them if needed, and switch composer mode to Agent (</> Agent) to begin autonomous execution.\n"
+                "5. Only AFTER emitting 'create_artifact' with the complete plan content in 'content', emit action 'done'. Do NOT proceed to implementation yourself in Plan mode.\n"
             )
             await self.send_status("📋 Mode [Plan]: Formulating architecture & implementation plan for review...")
 
@@ -2323,6 +2324,13 @@ class AgentLoop:
                         a_title = action_param.artifact_title or action_param.target or "Project Document"
                         a_type = action_param.artifact_type or "markdown"
                         a_content = action_param.content or action_param.text or ""
+                        if not a_content.strip():
+                            if planner_response.message_to_user and len(planner_response.message_to_user.strip()) > 30:
+                                a_content = f"# {a_title}\n\n{planner_response.message_to_user.strip()}"
+                            elif planner_response.thought_process and len(planner_response.thought_process.strip()) > 30:
+                                a_content = f"# {a_title}\n\n{planner_response.thought_process.strip()}"
+                            else:
+                                a_content = f"# {a_title}\n\n## Overview\nImplementation specification for: {clean_goal}\n\n## Tasks Roadmap\nReview the defined roadmap milestones and switch to Agent mode to begin execution."
                         art = artifacts_manager.create_artifact(
                             title=a_title,
                             artifact_type=a_type,
