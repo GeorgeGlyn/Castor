@@ -3725,45 +3725,55 @@ function ChatWindow() {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 relative h-full">
         {/* Top Chat Header Bar */}
-        <header className="h-12 border-b border-zinc-800/80 bg-[#09090b]/90 backdrop-blur px-5 flex items-center justify-between z-10 select-none">
-          <div className="flex items-center gap-3 min-w-0">
-            <h1 className="text-sm font-semibold text-zinc-200 truncate">
+        {/* Top Chat Header Bar - Sleek Cursor/Linear Aesthetic */}
+        <header className="h-11 border-b border-zinc-800/70 bg-[#09090c]/95 backdrop-blur px-3 sm:px-4 flex items-center justify-between z-10 select-none shrink-0 gap-2">
+          {/* Left: Chat Title & Active Project Pill */}
+          <div className="flex items-center gap-2.5 min-w-0">
+            <h1 className="text-xs font-medium text-zinc-200 truncate max-w-[120px] sm:max-w-xs" title={activeChat?.title || 'New Chat'}>
               {activeChat?.title || 'New Chat'}
             </h1>
-            <div className="h-3.5 w-px bg-zinc-800" />
-            <div className="flex items-center gap-1.5 text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 px-2.5 py-1 rounded-full truncate max-w-sm">
-              <span className="text-xs">📁</span>
+            <div className="h-3 w-px bg-zinc-800 shrink-0" />
+            <button
+              onClick={handleBrowseProject}
+              className="flex items-center gap-1.5 text-[11px] text-zinc-400 hover:text-zinc-200 bg-zinc-900/80 hover:bg-zinc-850 border border-zinc-800/80 hover:border-zinc-700 px-2 py-0.5 rounded-full truncate max-w-[160px] sm:max-w-xs transition-colors cursor-pointer group"
+              title="Click to change project workspace folder"
+            >
+              <span className="text-[11px]">📁</span>
               <span className="font-medium text-zinc-300 truncate">
                 {activeProject ? activeProject.name : 'No project linked'}
               </span>
               {activeProject?.path && (
-                <span className="text-[10px] text-zinc-500 font-mono hidden md:inline truncate ml-1">
+                <span className="text-[10px] text-zinc-500 font-mono hidden md:inline truncate ml-0.5">
                   ({activeProject.path})
                 </span>
               )}
-            </div>
+            </button>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* Multi-Provider AI Engine & Model Selector Badge */}
+          {/* Right: Model Pill, Display Selector, Segmented Tool Dock, Export & Window Pin */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Multi-Provider AI Engine & Model Selector Pill */}
             <button
               onClick={() => {
                 fetchProviders();
                 setIsCustomAgentModalOpen(true);
               }}
-              className="text-xs px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm border bg-zinc-850 hover:bg-zinc-800 text-zinc-300 hover:text-white border-zinc-750 hover:border-blue-500/50 cursor-pointer"
+              className="text-xs px-2.5 py-1 rounded-full transition-all flex items-center gap-1.5 bg-zinc-900/90 hover:bg-zinc-850 text-zinc-300 hover:text-white border border-zinc-800 hover:border-zinc-700 shadow-sm cursor-pointer"
               title="Active AI Engine & Model (Click to configure or switch models/providers)"
             >
               <span className="text-xs">
                 {activeProvider === 'ollama' ? '🦙' : activeProvider === 'deepseek' ? '🌐' : activeProvider === 'openai' ? '🤖' : activeProvider === 'anthropic' ? '🧠' : activeProvider === 'openrouter' ? '🔀' : '⚡'}
               </span>
-              <span className="font-medium capitalize">{activeProvider}</span>
-              <span className="text-[10px] text-zinc-400 font-mono hidden sm:inline">
-                ({availableProviders.find((p) => p.id === activeProvider)?.active_model || 'active'})
+              <span className="font-medium capitalize text-[11px]">{activeProvider}</span>
+              <span className="text-[10px] text-zinc-500 font-mono hidden sm:inline">
+                / {availableProviders.find((p) => p.id === activeProvider)?.active_model || 'active'}
               </span>
+              <svg className="w-2.5 h-2.5 text-zinc-500 ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
             </button>
 
-            {/* Multi-Monitor Display Selector */}
+            {/* Multi-Monitor Display Selector (if multiple monitors or icon) */}
             <div className="relative" ref={monitorMenuRef}>
               <button
                 onClick={() => {
@@ -3771,31 +3781,26 @@ function ChatWindow() {
                     setIsMonitorMenuOpen((prev) => !prev);
                   }
                 }}
-                className={`text-xs px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm border ${
+                className={`text-xs px-2 py-1 rounded-full transition-all flex items-center gap-1 border ${
                   monitors.length > 1
-                    ? 'bg-zinc-850 hover:bg-zinc-800 text-zinc-200 border-zinc-750 hover:border-blue-500/50 cursor-pointer'
-                    : 'bg-zinc-850/80 text-zinc-300 border-zinc-750 cursor-default'
+                    ? 'bg-zinc-900/90 hover:bg-zinc-850 text-zinc-300 hover:text-white border-zinc-800 hover:border-zinc-700 cursor-pointer'
+                    : 'bg-zinc-900/50 text-zinc-400 border-zinc-850 cursor-default'
                 }`}
-                title={monitors.length > 1 ? 'Click to select screen for AI visual automation' : 'Active screen for AI visual automation'}
+                title={monitors.length > 1 ? 'Target display for AI visual automation (Click to change)' : 'Active display for AI visual automation'}
               >
                 <span className="text-xs">🖥️</span>
-                <span className="font-medium">
+                <span className="text-[11px] font-medium hidden md:inline">
                   {monitors.find((m) => m.index === activeMonitorIndex)?.name || `Display ${activeMonitorIndex}`}
                 </span>
-                {monitors.find((m) => m.index === activeMonitorIndex) && (
-                  <span className="text-[10px] text-zinc-400 font-mono hidden sm:inline">
-                    ({monitors.find((m) => m.index === activeMonitorIndex)?.width}×{monitors.find((m) => m.index === activeMonitorIndex)?.height})
-                  </span>
-                )}
                 {monitors.length > 1 && (
-                  <svg className={`w-3 h-3 text-zinc-400 transition-transform ${isMonitorMenuOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg className={`w-2.5 h-2.5 text-zinc-500 transition-transform ${isMonitorMenuOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
                 )}
               </button>
 
               {isMonitorMenuOpen && monitors.length > 1 && (
-                <div className="absolute right-0 mt-1.5 w-64 bg-zinc-900 border border-zinc-700/80 rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
+                <div className="absolute right-0 mt-1.5 w-64 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
                   <div className="px-3 py-1.5 border-b border-zinc-800 text-[10px] font-semibold text-zinc-400 uppercase tracking-wider flex items-center justify-between">
                     <span>Target Display</span>
                     <span className="text-zinc-500 font-mono font-normal">{monitors.length} connected</span>
@@ -3807,7 +3812,7 @@ function ChatWindow() {
                         <button
                           key={mon.index}
                           onClick={() => handleSelectMonitor(mon.index)}
-                          className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-zinc-800/80 transition-colors ${
+                          className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-zinc-850 transition-colors ${
                             isSelected ? 'bg-blue-600/15 text-blue-300 font-medium' : 'text-zinc-300'
                           }`}
                         >
@@ -3822,13 +3827,13 @@ function ChatWindow() {
                                   </span>
                                 )}
                               </div>
-                              <div className="text-[10px] text-zinc-400 font-mono">
-                                {mon.width}×{mon.height} @ ({mon.left}, {mon.top})
+                              <div className="text-[10px] text-zinc-500 font-mono">
+                                {mon.width}×{mon.height}
                               </div>
                             </div>
                           </div>
                           {isSelected && (
-                            <svg className="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <svg className="w-3.5 h-3.5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                             </svg>
                           )}
@@ -3840,173 +3845,163 @@ function ChatWindow() {
               )}
             </div>
 
-            <button
-              onClick={toggleAlwaysOnTop}
-              className={`text-xs px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm border ${
-                isAlwaysOnTop
-                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30'
-                  : 'text-zinc-400 hover:text-zinc-200 bg-zinc-850 hover:bg-zinc-800 border-zinc-750'
-              }`}
-              title={isAlwaysOnTop ? 'Castor stays floating above other apps (Click to unpin)' : 'Pin Castor to stay always on top of other apps'}
-            >
-              <span className="text-xs">{isAlwaysOnTop ? '📌' : '📍'}</span>
-              <span>{isAlwaysOnTop ? 'Pinned' : 'Pin Top'}</span>
-            </button>
-
-            <button
-              onClick={() => setIsArtifactsOpen((prev) => !prev)}
-              className={`text-xs px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm border ${
-                artifacts.length > 0
-                  ? 'bg-blue-950/50 hover:bg-blue-900/60 text-blue-200 border-blue-700/50'
-                  : 'text-zinc-400 hover:text-zinc-200 bg-zinc-850 hover:bg-zinc-800 border-zinc-750'
-              }`}
-              title="Toggle Living Artifacts, Plans, and Specs"
-            >
-              <span>📄</span>
-              <span>Artifacts</span>
-              {artifacts.length > 0 && (
-                <span className="text-[10px] font-mono bg-blue-600 text-white px-1.5 py-0.2 rounded-full font-bold">
-                  {artifacts.length}
-                </span>
-              )}
-            </button>
-
-            {/* Phase 12: Self-Evolving Skills & Persistent Learned Playbooks Header Button */}
-            <button
-              onClick={() => {
-                setSidecarTab('skills');
-                setIsArtifactsOpen(true);
-              }}
-              className="text-xs px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm border text-zinc-400 hover:text-zinc-200 bg-zinc-850 hover:bg-zinc-800 border-zinc-750"
-              title="View Self-Evolving Skills & Persistent Learned Playbooks (Phase 12)"
-            >
-              <span>🧠</span>
-              <span>Skills & Playbooks</span>
-            </button>
-
-            {/* Phase 6: Terminal & Background Process Watchdog Header Button */}
-            <button
-              onClick={() => {
-                setIsWatchdogOpen((prev) => !prev);
-                fetchTasks();
-              }}
-              className={`text-xs px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm border ${
-                backgroundTasks.some((t) => t.status === 'running')
-                  ? 'bg-emerald-950/60 hover:bg-emerald-900/70 text-emerald-300 border-emerald-700/60 animate-in fade-in-50'
-                  : 'text-zinc-400 hover:text-zinc-200 bg-zinc-850 hover:bg-zinc-800 border-zinc-750'
-              }`}
-              title="Terminal & Background Process Watchdog (Dev servers, ports, daemons)"
-            >
-              <span className="relative flex h-2 w-2">
-                {backgroundTasks.some((t) => t.status === 'running') ? (
-                  <>
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                  </>
-                ) : (
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-zinc-600"></span>
+            {/* Segmented Tool Dock */}
+            <div className="flex items-center bg-zinc-900/80 border border-zinc-800/80 rounded-lg p-0.5 gap-0.5 shadow-sm">
+              {/* Artifacts */}
+              <button
+                onClick={() => setIsArtifactsOpen((prev) => !prev)}
+                className={`text-xs px-2 py-1 rounded-md transition-colors flex items-center gap-1.5 ${
+                  artifacts.length > 0
+                    ? 'bg-blue-950/60 text-blue-300 border border-blue-800/50'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
+                }`}
+                title="Toggle Living Artifacts, Plans & Specs"
+              >
+                <span>📄</span>
+                <span className="text-[11px] hidden xl:inline">Artifacts</span>
+                {artifacts.length > 0 && (
+                  <span className="text-[10px] font-mono bg-blue-600 text-white px-1.5 rounded-full font-bold">
+                    {artifacts.length}
+                  </span>
                 )}
-              </span>
-              <span>Watchdog</span>
-              {backgroundTasks.length > 0 && (
-                <span
-                  className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full font-bold ${
-                    backgroundTasks.some((t) => t.status === 'running')
-                      ? 'bg-emerald-600 text-white'
-                      : 'bg-zinc-700 text-zinc-300'
-                  }`}
-                >
-                  {backgroundTasks.filter((t) => t.status === 'running').length > 0
-                    ? `${backgroundTasks.filter((t) => t.status === 'running').length} Active`
-                    : backgroundTasks.length}
+              </button>
+
+              {/* Skills & Playbooks */}
+              <button
+                onClick={() => {
+                  setSidecarTab('skills');
+                  setIsArtifactsOpen(true);
+                }}
+                className="text-xs px-2 py-1 rounded-md transition-colors flex items-center gap-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60"
+                title="View Self-Evolving Skills & Persistent Learned Playbooks"
+              >
+                <span>🧠</span>
+                <span className="text-[11px] hidden xl:inline">Playbooks</span>
+              </button>
+
+              {/* Watchdog */}
+              <button
+                onClick={() => {
+                  setIsWatchdogOpen((prev) => !prev);
+                  fetchTasks();
+                }}
+                className={`text-xs px-2 py-1 rounded-md transition-colors flex items-center gap-1.5 ${
+                  backgroundTasks.some((t) => t.status === 'running')
+                    ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-800/60'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
+                }`}
+                title="Terminal & Background Process Watchdog (Dev servers, ports, daemons)"
+              >
+                <span className="relative flex h-2 w-2">
+                  {backgroundTasks.some((t) => t.status === 'running') ? (
+                    <>
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                    </>
+                  ) : (
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-zinc-600"></span>
+                  )}
                 </span>
-              )}
-            </button>
-
-            {/* Phase 7: Codebase AST & Symbol Graph Indexer Header Button */}
-            <button
-              onClick={() => {
-                setIsSymbolsModalOpen(true);
-                fetchSymbolStats();
-              }}
-              className="text-xs px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm border text-zinc-400 hover:text-zinc-200 bg-zinc-850 hover:bg-zinc-800 border-zinc-750"
-              title="Codebase AST & Symbol Graph Indexer (Ctrl+Shift+O)"
-            >
-              <span>🔍</span>
-              <span>Symbols</span>
-              {symbolStats.total_symbols > 0 && (
-                <span className="text-[10px] font-mono bg-zinc-700 text-zinc-300 px-1.5 py-0.2 rounded-full font-bold">
-                  {symbolStats.total_symbols}
-                </span>
-              )}
-            </button>
-
-            {/* Phase 8: Git Checkpoints & Interactive Rollback Timeline Header Button */}
-            <button
-              onClick={() => {
-                setIsCheckpointsModalOpen(true);
-                fetchCheckpoints();
-              }}
-              className="text-xs px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm border text-zinc-400 hover:text-zinc-200 bg-zinc-850 hover:bg-zinc-800 border-zinc-750"
-              title="Git Checkpoints & Interactive Rollback Timeline (Safety rewinds & visual diffs)"
-            >
-              <span>🛡️</span>
-              <span>Checkpoints</span>
-              {checkpointsList.length > 0 && (
-                <span className="text-[10px] font-mono bg-amber-950/80 text-amber-300 border border-amber-800/60 px-1.5 py-0.2 rounded-full font-bold">
-                  {checkpointsList.length}
-                </span>
-              )}
-            </button>
-
-            {/* Phase 9: Real-Time Diagnostic Lint & LSP Compiler Loop Header Button */}
-            <button
-              onClick={() => {
-                setIsDiagnosticsModalOpen(true);
-                fetchDiagnostics();
-              }}
-              className="text-xs px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm border text-zinc-400 hover:text-zinc-200 bg-zinc-850 hover:bg-zinc-800 border-zinc-750"
-              title="Real-Time Diagnostic Lint & LSP Compiler Loop (Ctrl+Shift+D)"
-            >
-              <span>🩺</span>
-              <span>Diagnostics</span>
-              {diagnosticsData ? (
-                diagnosticsData.total_errors > 0 ? (
-                  <span className="text-[10px] font-mono bg-rose-950/80 text-rose-300 border border-rose-800/60 px-1.5 py-0.2 rounded-full font-bold animate-pulse">
-                    {diagnosticsData.total_errors} err
+                <span className="text-[11px] hidden lg:inline">Watchdog</span>
+                {backgroundTasks.length > 0 && (
+                  <span
+                    className={`text-[10px] font-mono px-1.5 rounded-full font-bold ${
+                      backgroundTasks.some((t) => t.status === 'running')
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-zinc-800 text-zinc-400'
+                    }`}
+                  >
+                    {backgroundTasks.filter((t) => t.status === 'running').length > 0
+                      ? `${backgroundTasks.filter((t) => t.status === 'running').length}`
+                      : backgroundTasks.length}
                   </span>
-                ) : diagnosticsData.total_warnings > 0 ? (
-                  <span className="text-[10px] font-mono bg-amber-950/80 text-amber-300 border border-amber-800/60 px-1.5 py-0.2 rounded-full font-bold">
-                    {diagnosticsData.total_warnings} warn
-                  </span>
-                ) : (
-                  <span className="text-[10px] font-mono bg-emerald-950/80 text-emerald-300 border border-emerald-800/60 px-1.5 py-0.2 rounded-full font-bold">
-                    ✓ clean
-                  </span>
-                )
-              ) : null}
-            </button>
+                )}
+              </button>
 
-            {/* Session Export & Run Report Dropdown */}
+              {/* AST Symbols */}
+              <button
+                onClick={() => {
+                  setIsSymbolsModalOpen(true);
+                  fetchSymbolStats();
+                }}
+                className="text-xs px-2 py-1 rounded-md transition-colors flex items-center gap-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60"
+                title="Codebase AST & Symbol Graph Indexer (Ctrl+Shift+O)"
+              >
+                <span>🔍</span>
+                <span className="text-[11px] hidden 2xl:inline">Symbols</span>
+                {symbolStats.total_symbols > 0 && (
+                  <span className="text-[10px] font-mono bg-zinc-800 text-zinc-400 px-1.5 rounded-full font-semibold">
+                    {symbolStats.total_symbols}
+                  </span>
+                )}
+              </button>
+
+              {/* Checkpoints */}
+              <button
+                onClick={() => {
+                  setIsCheckpointsModalOpen(true);
+                  fetchCheckpoints();
+                }}
+                className="text-xs px-2 py-1 rounded-md transition-colors flex items-center gap-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60"
+                title="Git Checkpoints & Interactive Rollback Timeline"
+              >
+                <span>🛡️</span>
+                <span className="text-[11px] hidden 2xl:inline">Checkpoints</span>
+                {checkpointsList.length > 0 && (
+                  <span className="text-[10px] font-mono bg-amber-950/80 text-amber-300 border border-amber-800/50 px-1.5 rounded-full font-bold">
+                    {checkpointsList.length}
+                  </span>
+                )}
+              </button>
+
+              {/* Diagnostics */}
+              <button
+                onClick={() => {
+                  setIsDiagnosticsModalOpen(true);
+                  fetchDiagnostics();
+                }}
+                className="text-xs px-2 py-1 rounded-md transition-colors flex items-center gap-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60"
+                title="Real-Time Diagnostic Lint & LSP Compiler Loop (Ctrl+Shift+D)"
+              >
+                <span>🩺</span>
+                <span className="text-[11px] hidden lg:inline">Diagnostics</span>
+                {diagnosticsData ? (
+                  diagnosticsData.total_errors > 0 ? (
+                    <span className="text-[10px] font-mono bg-rose-950/80 text-rose-300 border border-rose-800/60 px-1.5 rounded-full font-bold animate-pulse">
+                      {diagnosticsData.total_errors} err
+                    </span>
+                  ) : diagnosticsData.total_warnings > 0 ? (
+                    <span className="text-[10px] font-mono bg-amber-950/80 text-amber-300 border border-amber-800/60 px-1.5 rounded-full font-bold">
+                      {diagnosticsData.total_warnings} warn
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-mono bg-emerald-950/80 text-emerald-300 border border-emerald-800/60 px-1.5 rounded-full font-bold">
+                      ✓
+                    </span>
+                  )
+                ) : null}
+              </button>
+            </div>
+
+            {/* Session Export Menu */}
             <div className="relative" ref={exportMenuRef}>
               <button
                 onClick={() => setIsExportMenuOpen((prev) => !prev)}
-                className={`text-xs px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm border ${
+                className={`text-xs px-2 py-1 rounded-md transition-colors flex items-center gap-1 border ${
                   isExportMenuOpen
-                    ? 'bg-zinc-800 text-zinc-100 border-zinc-600'
-                    : 'text-zinc-400 hover:text-zinc-200 bg-zinc-850 hover:bg-zinc-800 border-zinc-750'
+                    ? 'bg-zinc-800 text-zinc-100 border-zinc-700'
+                    : 'text-zinc-400 hover:text-zinc-200 bg-zinc-900/80 hover:bg-zinc-850 border-zinc-800 hover:border-zinc-750'
                 }`}
-                title="Export session run report, executive summary, or raw archive"
+                title="Export session report, markdown, or JSON"
               >
                 <span>📥</span>
-                <span>Export</span>
-                <svg className={`w-3 h-3 text-zinc-400 transition-transform ${isExportMenuOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className={`w-2.5 h-2.5 text-zinc-500 transition-transform ${isExportMenuOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
               </button>
 
               {isExportMenuOpen && (
-                <div className="absolute right-0 mt-1.5 w-64 bg-zinc-900 border border-zinc-750 rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
+                <div className="absolute right-0 mt-1.5 w-64 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
                   <div className="px-3 py-1.5 border-b border-zinc-800 text-[10px] font-semibold text-zinc-400 uppercase tracking-wider flex items-center justify-between">
                     <span>Export Session Report</span>
                     <span className="text-zinc-500 font-mono font-normal">Castor AI</span>
@@ -4014,34 +4009,34 @@ function ChatWindow() {
                   <div className="py-1">
                     <button
                       onClick={handleExportHtml}
-                      className="w-full text-left px-3 py-2 text-xs flex items-center gap-2.5 hover:bg-zinc-800 transition-colors text-zinc-200"
+                      className="w-full text-left px-3 py-2 text-xs flex items-center gap-2.5 hover:bg-zinc-850 transition-colors text-zinc-200"
                     >
                       <span className="text-base">🌐</span>
                       <div>
                         <div className="font-medium text-zinc-200">Interactive HTML Report</div>
-                        <div className="text-[10px] text-zinc-400">Self-contained, dark-mode, timeline &amp; diffs</div>
+                        <div className="text-[10px] text-zinc-500">Self-contained, dark-mode, timeline &amp; diffs</div>
                       </div>
                     </button>
 
                     <button
                       onClick={handleExportMarkdown}
-                      className="w-full text-left px-3 py-2 text-xs flex items-center gap-2.5 hover:bg-zinc-800 transition-colors text-zinc-200"
+                      className="w-full text-left px-3 py-2 text-xs flex items-center gap-2.5 hover:bg-zinc-850 transition-colors text-zinc-200"
                     >
                       <span className="text-base">📝</span>
                       <div>
                         <div className="font-medium text-zinc-200">GitHub Markdown (.md)</div>
-                        <div className="text-[10px] text-zinc-400">Checklists &amp; diffs for PRs and issues</div>
+                        <div className="text-[10px] text-zinc-500">Checklists &amp; diffs for PRs and issues</div>
                       </div>
                     </button>
 
                     <button
                       onClick={handleExportPdf}
-                      className="w-full text-left px-3 py-2 text-xs flex items-center gap-2.5 hover:bg-zinc-800 transition-colors text-zinc-200"
+                      className="w-full text-left px-3 py-2 text-xs flex items-center gap-2.5 hover:bg-zinc-850 transition-colors text-zinc-200"
                     >
                       <span className="text-base">🖨️</span>
                       <div>
                         <div className="font-medium text-zinc-200">Print / Save as PDF</div>
-                        <div className="text-[10px] text-zinc-400">Formatted executive summary document</div>
+                        <div className="text-[10px] text-zinc-500">Formatted executive summary document</div>
                       </div>
                     </button>
 
@@ -4049,7 +4044,7 @@ function ChatWindow() {
 
                     <button
                       onClick={handleExportJson}
-                      className="w-full text-left px-3 py-2 text-xs flex items-center gap-2.5 hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-zinc-200"
+                      className="w-full text-left px-3 py-2 text-xs flex items-center gap-2.5 hover:bg-zinc-850 transition-colors text-zinc-400 hover:text-zinc-200"
                     >
                       <span className="text-base">📦</span>
                       <div>
@@ -4062,13 +4057,17 @@ function ChatWindow() {
               )}
             </div>
 
+            {/* Window Pin Toggle */}
             <button
-              onClick={handleBrowseProject}
-              className="text-xs text-zinc-400 hover:text-zinc-200 bg-zinc-850 hover:bg-zinc-800 border border-zinc-750 px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm"
-              title="Change project folder"
+              onClick={toggleAlwaysOnTop}
+              className={`text-xs p-1.5 rounded-md transition-colors flex items-center justify-center border ${
+                isAlwaysOnTop
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30'
+                  : 'text-zinc-500 hover:text-zinc-300 bg-zinc-900/80 hover:bg-zinc-850 border-zinc-800 hover:border-zinc-750'
+              }`}
+              title={isAlwaysOnTop ? 'Castor stays floating above other apps (Click to unpin)' : 'Pin Castor to stay always on top of other apps'}
             >
-              <span>📂</span>
-              <span>Change Project</span>
+              <span className="text-xs">{isAlwaysOnTop ? '📌' : '📍'}</span>
             </button>
           </div>
         </header>
@@ -4212,19 +4211,117 @@ function ChatWindow() {
         <main className="flex-1 overflow-y-auto px-4 py-6 pb-36">
           <div className="max-w-3xl mx-auto space-y-5">
             {messages.length === 0 && (
-              <div className="flex flex-col items-center justify-center min-h-[50vh] text-center text-zinc-500 select-none">
-                <div className="w-14 h-14 mb-4 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center shadow-lg text-2xl">
-                  🪄
+              <div className="flex flex-col items-center justify-center min-h-[52vh] text-center select-none py-8">
+                {/* Brand Logo & Subtle Glowing Aura */}
+                <div className="relative mb-5">
+                  <div className="absolute -inset-2 bg-gradient-to-r from-blue-600/20 to-purple-600/20 rounded-2xl blur-lg opacity-75"></div>
+                  <div className="relative w-14 h-14 rounded-2xl bg-gradient-to-b from-zinc-800 to-zinc-900 border border-zinc-700/80 flex items-center justify-center shadow-xl text-2xl">
+                    ⚡
+                  </div>
                 </div>
-                <h2 className="text-lg font-medium text-zinc-200 mb-1.5">How can I help you today?</h2>
-                <p className="text-xs text-zinc-400 max-w-sm mb-4">
-                  Operating in project:{' '}
-                  <span className="font-semibold text-zinc-200 font-mono">
-                    {activeProject ? activeProject.name : 'Castor Workspace'}
-                  </span>
+
+                <h2 className="text-xl font-semibold text-zinc-100 tracking-tight mb-2">
+                  What would you like to build?
+                </h2>
+                <p className="text-xs text-zinc-400 max-w-md mb-6 leading-relaxed">
+                  Autonomous coding pair programmer powered by local AST indexing, real-time LSP diagnostics, and self-evolving playbooks.
                 </p>
-                <div className="px-3 py-1.5 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] font-medium text-zinc-500">
-                  Kill Switch: <kbd className="font-mono bg-zinc-800 px-1 py-0.5 rounded text-zinc-400">Ctrl+Shift+Esc</kbd>
+
+                {/* Quick Action Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full max-w-lg mb-6 text-left">
+                  <button
+                    onClick={() => {
+                      setIsSymbolsModalOpen(true);
+                      fetchSymbolStats();
+                    }}
+                    className="p-3 rounded-xl bg-zinc-900/70 hover:bg-zinc-850/80 border border-zinc-800/80 hover:border-zinc-700 transition-all group flex items-start gap-3 cursor-pointer shadow-sm"
+                  >
+                    <span className="text-base p-1.5 rounded-lg bg-zinc-800/80 group-hover:bg-blue-600/20 group-hover:text-blue-300 transition-colors">
+                      🔍
+                    </span>
+                    <div>
+                      <div className="text-xs font-medium text-zinc-200 group-hover:text-blue-300 transition-colors">
+                        Explore Codebase AST
+                      </div>
+                      <div className="text-[11px] text-zinc-500 line-clamp-1">
+                        Fast symbol hierarchy &amp; reference graph
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setIsDiagnosticsModalOpen(true);
+                      fetchDiagnostics();
+                    }}
+                    className="p-3 rounded-xl bg-zinc-900/70 hover:bg-zinc-850/80 border border-zinc-800/80 hover:border-zinc-700 transition-all group flex items-start gap-3 cursor-pointer shadow-sm"
+                  >
+                    <span className="text-base p-1.5 rounded-lg bg-zinc-800/80 group-hover:bg-rose-600/20 group-hover:text-rose-300 transition-colors">
+                      🩺
+                    </span>
+                    <div>
+                      <div className="text-xs font-medium text-zinc-200 group-hover:text-rose-300 transition-colors">
+                        Compiler Diagnostic Loop
+                      </div>
+                      <div className="text-[11px] text-zinc-500 line-clamp-1">
+                        Find errors across your project
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setSidecarTab('skills');
+                      setIsArtifactsOpen(true);
+                    }}
+                    className="p-3 rounded-xl bg-zinc-900/70 hover:bg-zinc-850/80 border border-zinc-800/80 hover:border-zinc-700 transition-all group flex items-start gap-3 cursor-pointer shadow-sm"
+                  >
+                    <span className="text-base p-1.5 rounded-lg bg-zinc-800/80 group-hover:bg-emerald-600/20 group-hover:text-emerald-300 transition-colors">
+                      🧠
+                    </span>
+                    <div>
+                      <div className="text-xs font-medium text-zinc-200 group-hover:text-emerald-300 transition-colors">
+                        Learned Playbooks
+                      </div>
+                      <div className="text-[11px] text-zinc-500 line-clamp-1">
+                        Distilled workflow knowledge &amp; rules
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setIsCheckpointsModalOpen(true);
+                      fetchCheckpoints();
+                    }}
+                    className="p-3 rounded-xl bg-zinc-900/70 hover:bg-zinc-850/80 border border-zinc-800/80 hover:border-zinc-700 transition-all group flex items-start gap-3 cursor-pointer shadow-sm"
+                  >
+                    <span className="text-base p-1.5 rounded-lg bg-zinc-800/80 group-hover:bg-amber-600/20 group-hover:text-amber-300 transition-colors">
+                      🛡️
+                    </span>
+                    <div>
+                      <div className="text-xs font-medium text-zinc-200 group-hover:text-amber-300 transition-colors">
+                        Git Safety Checkpoints
+                      </div>
+                      <div className="text-[11px] text-zinc-500 line-clamp-1">
+                        Instant undo &amp; visual rollback points
+                      </div>
+                    </div>
+                  </button>
+                </div>
+
+                {/* Status Badges */}
+                <div className="flex items-center gap-2 flex-wrap justify-center text-[11px] text-zinc-500">
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-zinc-900/80 border border-zinc-800 font-mono">
+                    <span className="text-zinc-400">Workspace:</span>
+                    <span className="text-zinc-300 font-semibold truncate max-w-[150px]">
+                      {activeProject ? activeProject.name : 'Castor'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-zinc-900/80 border border-zinc-800 font-mono">
+                    <span className="text-zinc-400">Emergency Stop:</span>
+                    <kbd className="bg-zinc-800 px-1 py-0.2 rounded text-zinc-300 text-[10px]">Ctrl+Shift+Esc</kbd>
+                  </div>
                 </div>
               </div>
             )}

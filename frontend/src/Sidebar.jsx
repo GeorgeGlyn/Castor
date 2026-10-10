@@ -2,8 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 
 function Sidebar({
   isConnected,
-  availableSkills,
-  activeSkills,
+  availableSkills = [],
+  activeSkills = [],
   projects = [],
   activeProject,
   onSelectProject,
@@ -47,33 +47,33 @@ function Sidebar({
 
   if (isCollapsed) {
     return (
-      <div className="w-16 bg-[#09090b] border-r border-zinc-800 flex flex-col items-center py-4 transition-all duration-300 z-20">
+      <div className="w-14 bg-[#09090d] border-r border-zinc-800/60 flex flex-col items-center py-3.5 transition-all duration-200 z-20 shrink-0">
         <button
           onClick={() => setIsCollapsed(false)}
-          className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors"
+          className="p-2 rounded-lg hover:bg-zinc-800/60 text-zinc-400 hover:text-zinc-200 transition-colors"
           title="Expand Sidebar"
         >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
           </svg>
         </button>
 
         <button
           onClick={onNewChat}
-          className="mt-4 p-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
+          className="mt-3 p-2 rounded-lg bg-zinc-850 hover:bg-zinc-800 text-zinc-200 border border-zinc-750 transition-colors shadow-sm"
           title="New Chat"
         >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
         </button>
 
-        <div className="mt-auto mb-4">
+        <div className="mt-auto mb-2 flex flex-col items-center gap-2">
           <div
-            className={`w-3 h-3 rounded-full ${
-              isConnected ? 'bg-green-500 shadow-[0_0_8px_#22c55e]' : 'bg-red-500'
+            className={`w-2 h-2 rounded-full ${
+              isConnected ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]' : 'bg-rose-500'
             }`}
-            title={isConnected ? 'Connected' : 'Disconnected'}
+            title={isConnected ? 'FastAPI Connected' : 'Disconnected'}
           />
         </div>
       </div>
@@ -81,54 +81,48 @@ function Sidebar({
   }
 
   return (
-    <div className="w-72 bg-[#09090b] border-r border-zinc-800 flex flex-col transition-all duration-300 text-zinc-300 font-sans h-full z-20 select-none">
-      {/* Top Header */}
-      <div className="p-3.5 flex items-center justify-between border-b border-zinc-800/80">
+    <div className="w-64 bg-[#09090d] border-r border-zinc-800/60 flex flex-col transition-all duration-200 text-zinc-300 font-sans h-full z-20 select-none shrink-0">
+      {/* Top Brand Header */}
+      <div className="h-12 px-3.5 flex items-center justify-between border-b border-zinc-800/60 shrink-0">
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-zinc-700 to-zinc-900 border border-zinc-700 flex items-center justify-center text-xs font-bold text-zinc-200 shadow-sm">
-            C
+          <div className="w-6 h-6 rounded-md bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-[11px] font-bold text-white shadow-sm ring-1 ring-white/10">
+            ⚡
           </div>
-          <span className="font-semibold text-sm tracking-wide text-zinc-100">Castor AI</span>
+          <div className="flex items-center gap-1.5">
+            <span className="font-semibold text-xs tracking-tight text-zinc-100">Castor</span>
+            <span className="text-[10px] text-zinc-500 font-mono font-medium">IDE</span>
+          </div>
         </div>
         <button
           onClick={() => setIsCollapsed(true)}
-          className="p-1 rounded-md hover:bg-zinc-800/80 text-zinc-400 hover:text-zinc-200 transition-colors"
+          className="p-1 rounded-md hover:bg-zinc-800/60 text-zinc-400 hover:text-zinc-200 transition-colors"
           title="Collapse Sidebar"
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
           </svg>
         </button>
       </div>
 
-      {/* Project Selector Card */}
-      <div className="p-3 border-b border-zinc-800/80 relative" ref={dropdownRef}>
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-1.5 flex items-center justify-between">
-          <span>Active Project</span>
-          {activeProject && (
-            <span className="text-[9px] text-zinc-400 font-mono bg-zinc-800/60 px-1 py-0.5 rounded">
-              Ready
-            </span>
-          )}
-        </div>
-
+      {/* Project Selector Trigger */}
+      <div className="p-2.5 border-b border-zinc-800/50 relative shrink-0" ref={dropdownRef}>
         <button
           onClick={() => setIsProjectDropdownOpen(!isProjectDropdownOpen)}
-          className="w-full flex items-center justify-between bg-zinc-900/90 hover:bg-zinc-800/80 border border-zinc-800 hover:border-zinc-700 text-left px-3 py-2 rounded-lg transition-all group shadow-sm"
+          className="w-full flex items-center justify-between bg-zinc-900/60 hover:bg-zinc-850/80 border border-zinc-800/70 hover:border-zinc-700/80 text-left px-2.5 py-1.5 rounded-lg transition-all group shadow-sm"
         >
           <div className="flex items-center gap-2 min-w-0">
-            <span className="text-base flex-shrink-0">📁</span>
+            <span className="text-sm flex-shrink-0 opacity-80 group-hover:opacity-100">📁</span>
             <div className="min-w-0">
-              <div className="text-xs font-medium text-zinc-200 truncate">
-                {activeProject ? activeProject.name : 'Select or Create Project'}
+              <div className="text-[11px] font-semibold text-zinc-200 truncate leading-tight">
+                {activeProject ? activeProject.name : 'Select Project'}
               </div>
-              <div className="text-[10px] text-zinc-500 truncate font-mono">
-                {activeProject ? activeProject.path : 'No directory chosen'}
+              <div className="text-[10px] text-zinc-500 truncate font-mono leading-tight mt-0.5">
+                {activeProject ? activeProject.path : 'No workspace linked'}
               </div>
             </div>
           </div>
           <svg
-            className={`w-3.5 h-3.5 text-zinc-400 transition-transform flex-shrink-0 ml-1.5 ${
+            className={`w-3 h-3 text-zinc-500 group-hover:text-zinc-300 transition-transform flex-shrink-0 ml-1 ${
               isProjectDropdownOpen ? 'rotate-180' : ''
             }`}
             fill="none"
@@ -141,20 +135,20 @@ function Sidebar({
 
         {/* Project Selector Dropdown Menu */}
         {isProjectDropdownOpen && (
-          <div className="absolute left-3 right-3 top-[calc(100%+4px)] bg-[#18181b] border border-zinc-700 rounded-xl shadow-2xl p-2 z-50 text-xs flex flex-col gap-2 backdrop-blur-md">
-            <div className="flex items-center justify-between px-1 text-zinc-400 font-medium text-[11px]">
-              <span>Choose Project</span>
+          <div className="absolute left-2.5 right-2.5 top-[calc(100%+4px)] bg-[#121217] border border-zinc-750 rounded-xl shadow-2xl p-2 z-50 text-xs flex flex-col gap-2 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100">
+            <div className="flex items-center justify-between px-1 text-zinc-400 font-semibold text-[10px] uppercase tracking-wider">
+              <span>Workspaces</span>
               <button
                 onClick={onBrowseProject}
-                className="text-blue-400 hover:text-blue-300 flex items-center gap-1 hover:underline text-[11px]"
-                title="Browse existing folder on your computer"
+                className="text-blue-400 hover:text-blue-300 flex items-center gap-0.5 hover:underline lowercase font-normal"
+                title="Browse folder on your system"
               >
-                <span>Browse...</span>
+                <span>browse...</span>
               </button>
             </div>
 
             {/* Existing Projects List */}
-            <div className="max-h-40 overflow-y-auto space-y-1 pr-1">
+            <div className="max-h-40 overflow-y-auto space-y-0.5 pr-0.5">
               {projects.length > 0 ? (
                 projects.map((proj) => {
                   const isSelected = activeProject?.path === proj.path;
@@ -167,49 +161,49 @@ function Sidebar({
                       }}
                       className={`w-full text-left px-2 py-1.5 rounded-md flex items-center justify-between transition-colors ${
                         isSelected
-                          ? 'bg-blue-600/20 text-blue-300 border border-blue-500/30'
-                          : 'hover:bg-zinc-800/80 text-zinc-300'
+                          ? 'bg-blue-600/20 text-blue-200 border border-blue-500/30'
+                          : 'hover:bg-zinc-800/60 text-zinc-300'
                       }`}
                     >
                       <div className="min-w-0 pr-2">
-                        <div className="font-medium truncate">{proj.name}</div>
-                        <div className="text-[10px] text-zinc-500 truncate font-mono">{proj.path}</div>
+                        <div className="font-medium text-xs truncate">{proj.name}</div>
+                        <div className="text-[9px] text-zinc-500 truncate font-mono">{proj.path}</div>
                       </div>
-                      {isSelected && <span className="text-blue-400 text-xs">✓</span>}
+                      {isSelected && <span className="text-blue-400 text-xs font-bold">✓</span>}
                     </button>
                   );
                 })
               ) : (
-                <div className="text-zinc-500 py-1 px-2 italic text-[11px]">
-                  No projects found in default directory.
+                <div className="text-zinc-500 py-1.5 px-2 italic text-[10px]">
+                  No workspaces detected.
                 </div>
               )}
             </div>
 
             {/* Create Project Section */}
-            <div className="border-t border-zinc-800 pt-2">
+            <div className="border-t border-zinc-800/80 pt-1.5">
               {isCreatingNewProj ? (
                 <form onSubmit={handleCreateSubmit} className="space-y-1.5">
                   <input
                     type="text"
                     autoFocus
-                    placeholder="Project name (e.g. MyPlatformer)"
+                    placeholder="Workspace name..."
                     value={newProjectName}
                     onChange={(e) => setNewProjectName(e.target.value)}
-                    className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-zinc-200 text-xs outline-none focus:border-blue-500"
+                    className="w-full bg-zinc-900 border border-zinc-700/80 rounded-md px-2 py-1 text-zinc-200 text-xs outline-none focus:border-blue-500"
                   />
                   <div className="flex gap-1.5">
                     <button
                       type="submit"
                       disabled={!newProjectName.trim()}
-                      className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded px-2 py-1 font-medium text-[11px] transition-colors"
+                      className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded px-2 py-1 font-semibold text-[10px] transition-colors"
                     >
                       Create
                     </button>
                     <button
                       type="button"
                       onClick={() => setIsCreatingNewProj(false)}
-                      className="bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded px-2 py-1 text-[11px] transition-colors"
+                      className="bg-zinc-800 hover:bg-zinc-750 text-zinc-400 rounded px-2 py-1 text-[10px] transition-colors"
                     >
                       Cancel
                     </button>
@@ -218,47 +212,45 @@ function Sidebar({
               ) : (
                 <button
                   onClick={() => setIsCreatingNewProj(true)}
-                  className="w-full flex items-center gap-1.5 text-zinc-300 hover:text-white hover:bg-zinc-800/70 px-2 py-1.5 rounded transition-colors text-[11px] font-medium"
+                  className="w-full flex items-center gap-1.5 text-zinc-300 hover:text-white hover:bg-zinc-800/60 px-2 py-1.5 rounded-md transition-colors text-[11px] font-medium"
                 >
-                  <span className="text-sm leading-none">+</span> Create New Project
+                  <span className="text-sm leading-none text-blue-400">+</span> Create Workspace
                 </button>
               )}
             </div>
 
             {/* Auto Create Project Toggle */}
-            <div className="border-t border-zinc-800 pt-2 px-1 flex items-center justify-between">
+            <div className="border-t border-zinc-800/80 pt-1.5 px-1 flex items-center justify-between">
               <label htmlFor="auto-proj-toggle" className="text-[10px] text-zinc-400 cursor-pointer pr-2">
-                Auto-create project for new chats
+                Auto-create for new chats
               </label>
               <input
                 id="auto-proj-toggle"
                 type="checkbox"
                 checked={autoCreateProject}
                 onChange={(e) => onToggleAutoCreate(e.target.checked)}
-                className="rounded bg-zinc-800 border-zinc-700 text-blue-500 focus:ring-0 cursor-pointer w-3.5 h-3.5"
+                className="rounded bg-zinc-800 border-zinc-700 text-blue-500 focus:ring-0 cursor-pointer w-3 h-3"
               />
             </div>
           </div>
         )}
       </div>
 
-      {/* New Chat Button */}
-      <div className="p-3">
+      {/* New Chat Primary Action */}
+      <div className="p-2 shrink-0">
         <button
           onClick={onNewChat}
-          className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-zinc-800 to-zinc-850 hover:from-zinc-750 hover:to-zinc-800 text-zinc-100 py-2 px-3 rounded-lg text-xs font-medium transition-all border border-zinc-700/80 shadow-sm active:scale-[0.98]"
+          className="w-full flex items-center justify-center gap-1.5 bg-zinc-900 hover:bg-zinc-850 hover:border-zinc-700 text-zinc-200 py-1.5 px-3 rounded-lg text-xs font-semibold transition-all border border-zinc-800/80 shadow-sm active:scale-[0.99]"
         >
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
+          <span className="text-sm font-bold leading-none text-blue-400">+</span>
           <span>New Chat</span>
         </button>
       </div>
 
-      {/* Chats History List */}
-      <div className="flex-1 overflow-y-auto px-3 py-1 space-y-1">
-        <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider px-1 mb-2">
-          Chat History
+      {/* Chats History List (Cursor borderless style) */}
+      <div className="flex-1 overflow-y-auto px-2 py-1 space-y-0.5">
+        <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider px-2 py-1">
+          Recent Chats
         </div>
 
         {chats.length > 0 ? (
@@ -268,135 +260,107 @@ function Sidebar({
               <div
                 key={chat.id}
                 onClick={() => onSelectChat(chat.id)}
-                className={`group relative flex flex-col px-2.5 py-2 rounded-lg cursor-pointer transition-all border ${
+                className={`group relative flex items-center justify-between px-2.5 py-1.5 rounded-lg cursor-pointer transition-all ${
                   isActive
-                    ? 'bg-zinc-850 border-zinc-700/80 text-zinc-100 shadow-sm'
-                    : 'border-transparent text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                    ? 'bg-zinc-800/80 text-zinc-100 font-medium border-l-2 border-blue-500 shadow-sm'
+                    : 'text-zinc-400 hover:bg-zinc-900/60 hover:text-zinc-200 border-l-2 border-transparent'
                 }`}
               >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium truncate pr-4">
+                <div className="min-w-0 flex-1 pr-1.5">
+                  <span className="text-xs truncate block">
                     {chat.title || 'New Chat'}
                   </span>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteChat(chat.id);
-                    }}
-                    className="opacity-0 group-hover:opacity-100 hover:text-red-400 p-0.5 rounded transition-opacity"
-                    title="Delete Chat"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                  </button>
+                  <div className="flex items-center gap-1 text-[9px] text-zinc-500 truncate font-mono mt-0.5">
+                    <span className="opacity-70">📁</span>
+                    <span className="truncate">{chat.project?.name || 'Default'}</span>
+                  </div>
                 </div>
 
-                {/* Attached Project Badge */}
-                <div className="mt-1 flex items-center gap-1 text-[10px] text-zinc-500 truncate">
-                  <span>📁</span>
-                  <span className="truncate">{chat.project?.name || 'Default'}</span>
-                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDeleteChat(chat.id);
+                  }}
+                  className="opacity-0 group-hover:opacity-100 hover:text-rose-400 p-1 rounded hover:bg-zinc-800 text-zinc-500 transition-all text-xs"
+                  title="Delete Chat"
+                >
+                  ✕
+                </button>
               </div>
             );
           })
         ) : (
-          <div className="text-xs text-zinc-600 px-2 py-3 italic">
+          <div className="text-xs text-zinc-600 px-2.5 py-2 italic text-[11px]">
             No previous chats.
           </div>
         )}
       </div>
 
-      {/* Interactive Skills & Plugins Marketplace Drawer */}
-      <div className="border-t border-zinc-800/80 p-3">
-        <div className="flex items-center justify-between text-[11px] font-semibold text-zinc-400 uppercase tracking-wider px-1 py-1">
+      {/* Skills & Plugins Marketplace Drawer */}
+      <div className="border-t border-zinc-800/60 p-2 shrink-0">
+        <button
+          onClick={() => setIsSkillsOpen(!isSkillsOpen)}
+          className="w-full flex items-center justify-between text-[11px] font-semibold text-zinc-400 hover:text-zinc-200 px-2 py-1.5 rounded-md hover:bg-zinc-900/60 transition-colors"
+        >
           <div className="flex items-center gap-1.5">
-            <span className="text-blue-400">🧩</span>
+            <span className="text-blue-400 text-xs">🧩</span>
             <span>Skills & Plugins</span>
-            <span className="text-[10px] text-zinc-500 font-mono">({availableSkills.length})</span>
           </div>
-          <button
-            onClick={() => setIsSkillsOpen(!isSkillsOpen)}
-            className="text-[10px] text-blue-400 hover:text-blue-300 font-mono underline uppercase"
-          >
-            {isSkillsOpen ? 'Close' : 'Browse'}
-          </button>
-        </div>
+          <span className="text-[10px] font-mono text-zinc-500 bg-zinc-900 px-1.5 py-0.2 rounded border border-zinc-800">
+            {availableSkills.length}
+          </span>
+        </button>
 
         {isSkillsOpen && (
-          <div className="mt-2.5 space-y-2 bg-[#0c0c0e] border border-zinc-800/80 rounded-xl p-2.5 shadow-inner">
-            <div className="flex items-center justify-between border-b border-zinc-800/60 pb-1.5 px-0.5">
-              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Installed Packs</span>
-              <span className="text-[9px] font-mono text-emerald-400 bg-emerald-950/60 border border-emerald-800/40 px-1.5 py-0.2 rounded-full">
+          <div className="mt-1.5 space-y-1.5 bg-[#0e0e13] border border-zinc-800/80 rounded-xl p-2 shadow-inner">
+            <div className="flex items-center justify-between pb-1 px-1 border-b border-zinc-800/60 text-[10px]">
+              <span className="text-zinc-400 font-semibold uppercase tracking-wider">Installed</span>
+              <span className="text-emerald-400 font-mono">
                 {activeSkills.length} Active
               </span>
             </div>
 
-            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+            <div className="space-y-1 max-h-36 overflow-y-auto pr-0.5">
               {availableSkills && availableSkills.length > 0 ? (
                 availableSkills.map((skill) => {
                   const isActive = activeSkills.includes(skill);
                   return (
                     <div
                       key={skill}
-                      className={`flex flex-col p-2 rounded-lg border text-xs transition-all ${
+                      className={`flex items-center justify-between px-2 py-1 rounded text-xs transition-all ${
                         isActive
-                          ? 'bg-blue-950/30 text-blue-200 border-blue-700/50 shadow-sm'
-                          : 'bg-zinc-900/60 text-zinc-400 border-zinc-800/60 hover:border-zinc-700'
+                          ? 'bg-blue-950/25 text-blue-200 border border-blue-800/40'
+                          : 'bg-zinc-900/50 text-zinc-400 hover:text-zinc-300'
                       }`}
                     >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className={`w-2 h-2 rounded-full ${isActive ? 'bg-blue-400 animate-pulse' : 'bg-zinc-600'}`} />
-                          <span className="font-semibold truncate text-[11px] text-zinc-200">{skill}</span>
-                        </div>
-                        <span
-                          className={`text-[9px] font-mono px-1.5 py-0.5 rounded font-bold uppercase ${
-                            isActive ? 'bg-blue-600 text-white' : 'bg-zinc-800 text-zinc-500'
-                          }`}
-                        >
-                          {isActive ? 'Active' : 'Installed'}
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-zinc-500 mt-1 line-clamp-1">
-                        {skill === 'unity'
-                          ? 'Unity 2D/3D development, physics, scripting & diagnostics'
-                          : skill === 'windows-power'
-                          ? 'Windows automation, process management, PowerShell & GUI'
-                          : skill === 'game-development-orchestrator'
-                          ? 'Universal game architecture, art pipeline & logic'
-                          : 'Domain procedural skills & helper scripts'}
+                      <span className="font-mono text-[11px] truncate">{skill}</span>
+                      <span className={`text-[9px] font-mono font-bold ${isActive ? 'text-blue-400' : 'text-zinc-600'}`}>
+                        {isActive ? 'ON' : 'OFF'}
                       </span>
                     </div>
                   );
                 })
               ) : (
-                <div className="text-xs text-zinc-500 px-1 italic py-2 text-center">No skills installed yet.</div>
+                <div className="text-[10px] text-zinc-500 py-1 text-center italic">No skills installed.</div>
               )}
             </div>
           </div>
         )}
       </div>
 
-
       {/* Footer / System Status */}
-      <div className="p-3 border-t border-zinc-800 flex items-center gap-2.5 bg-zinc-950/40">
-        <div className="relative flex items-center justify-center w-7 h-7 rounded-full bg-zinc-900 border border-zinc-800">
+      <div className="h-10 px-3 border-t border-zinc-800/60 flex items-center justify-between bg-zinc-950/30 shrink-0 text-xs">
+        <div className="flex items-center gap-2 min-w-0">
           <span
-            className={`absolute w-2 h-2 rounded-full bottom-0 right-0 border-2 border-[#09090b] ${
-              isConnected ? 'bg-green-500 shadow-[0_0_6px_#22c55e]' : 'bg-red-500'
+            className={`w-2 h-2 rounded-full shrink-0 ${
+              isConnected ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]' : 'bg-rose-500'
             }`}
           />
-          <svg className="w-3.5 h-3.5 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        </div>
-        <div className="flex flex-col min-w-0">
-          <span className="text-xs font-medium text-zinc-300 truncate">System Status</span>
-          <span className="text-[10px] text-zinc-500 truncate">
-            {isConnected ? 'FastAPI Connected' : 'Disconnected'}
+          <span className="text-[11px] font-medium text-zinc-400 truncate">
+            {isConnected ? 'FastAPI Connected' : 'Backend Disconnected'}
           </span>
         </div>
+        <span className="text-[9px] font-mono text-zinc-600 uppercase">v1.2</span>
       </div>
     </div>
   );
