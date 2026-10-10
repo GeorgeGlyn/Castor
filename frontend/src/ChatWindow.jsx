@@ -1301,6 +1301,8 @@ function ChatWindow() {
               y: data.y,
               bbox: data.bbox,
               crop: data.crop,
+              verified: data.verified,
+              delta: data.delta,
               time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             },
           ],
@@ -2416,6 +2418,15 @@ function ChatWindow() {
                           <span className="text-xs font-semibold text-zinc-100 truncate">
                             {msg.target}
                           </span>
+                          {msg.verified !== undefined && (
+                            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                              msg.verified
+                                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                            }`}>
+                              {msg.verified ? `✓ Verified (${msg.delta || 0}Δ)` : `⚠️ Unverified (${msg.delta || 0}Δ)`}
+                            </span>
+                          )}
                           {msg.time && (
                             <span className="text-[10px] text-zinc-500 font-mono ml-auto">
                               {msg.time}

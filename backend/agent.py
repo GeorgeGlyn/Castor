@@ -348,6 +348,59 @@ def generate_element_crop(
         return None
 
 
+def verify_visual_action_delta(
+    pre_img: Image.Image,
+    post_img: Image.Image,
+    px: int,
+    py: int,
+    monitor: dict,
+    patch_size: int = 180,
+    local_threshold: float = 2.0,
+    global_threshold: float = 1.0,
+) -> tuple[bool, float, float]:
+    """
+    Closed-Loop Action Verification (Astra-grade Look-Act-Verify):
+    Compares pre-action and post-action screenshots both locally around the click target (px, py)
+    and globally across the display to verify whether the UI responded.
+    Returns:
+        (is_verified: bool, local_delta: float, global_delta: float)
+    """
+    try:
+        if pre_img is None or post_img is None:
+            return False, 0.0, 0.0
+
+        # 1. Local Patch Delta (around target coordinate)
+        local_x = px - monitor.get("left", 0)
+        local_y = py - monitor.get("top", 0)
+
+        half = patch_size // 2
+        x1 = max(0, local_x - half)
+        y1 = max(0, local_y - half)
+        x2 = min(pre_img.width, local_x + half)
+        y2 = min(pre_img.height, local_y + half)
+
+        local_delta = 0.0
+        if x2 > x1 and y2 > y1:
+            pre_patch = pre_img.crop((x1, y1, x2, y2))
+            post_patch = post_img.crop((x1, y1, x2, y2))
+            diff_patch = ImageChops.difference(pre_patch, post_patch)
+            stat_patch = ImageStat.Stat(diff_patch)
+            local_delta = sum(stat_patch.mean) / max(1, len(stat_patch.mean))
+
+        # 2. Global Display Delta (downscaled for fast structural comparison)
+        small_pre = pre_img.resize((320, 180), Image.Resampling.NEAREST)
+        small_post = post_img.resize((320, 180), Image.Resampling.NEAREST)
+        diff_global = ImageChops.difference(small_pre, small_post)
+        stat_global = ImageStat.Stat(diff_global)
+        global_delta = sum(stat_global.mean) / max(1, len(stat_global.mean))
+
+        is_verified = (local_delta >= local_threshold) or (global_delta >= global_threshold)
+        return is_verified, local_delta, global_delta
+    except Exception as e:
+        print(f"[Castor] Action verification error: {e}")
+        return True, 0.0, 0.0
+
+
 # ── Agent Loop ────────────────────────────────────────────────────────────────
 
 class AgentLoop:
@@ -2488,10 +2541,85 @@ class AgentLoop:
                                     pyautogui.drag(0, 50, duration=0.3)
 
                         await asyncio.to_thread(execute_mouse)
+
+                        # ── Astra-Grade Closed-Loop Action Verification ──────────
+                        # Measure pre/post screen differential to confirm UI state transition
+                        await asyncio.sleep(0.35)  # Allow UI to render response (e.g. state transition / popup)
+                        post_img, _ = await self.capture_screen()
+
+                        is_verified, local_delta, global_delta = verify_visual_action_delta(
+                            pre_img=full_img,
+                            post_img=post_img,
+                            px=px,
+                            py=py,
+                            monitor=monitor
+                        )
+                        effective_delta = max(local_delta, global_delta)
+                        is_final_verified = is_verified
+
                         if _action_type == "click":
-                            await self.send_status(f"🎯 Clicked on '{action_param.target}'")
+                            if is_verified:
+                                await self.send_status(
+                                    f"✅ Verified click on '{action_param.target}' (UI response: {effective_delta:.1f}Δ)"
+                                )
+                                rolling_history.append(types.Content(
+                                    role="user",
+                                    parts=[types.Part(text=f"[ACTION VERIFIED] Click on '{action_param.target}' at ({px}, {py}) triggered confirmed UI change (delta: {effective_delta:.1f}).")]
+                                ))
+                            else:
+                                # Autonomous Micro-Correction Attempt (Jitter & Window Focus Click)
+                                await self.send_status(
+                                    f"⚠️ Low UI delta on '{action_param.target}' ({effective_delta:.1f}Δ). Applying autonomous activation retry..."
+                                )
+                                def retry_mouse():
+                                    ensure_input_desktop()
+                                    retry_x = px + 2
+                                    retry_y = py + 2
+                                    if os.name == "nt":
+                                        try:
+                                            import ctypes
+                                            ctypes.windll.user32.SetCursorPos(int(retry_x), int(retry_y))
+                                        except Exception:
+                                            pass
+                                    pyautogui.mouseDown(retry_x, retry_y)
+                                    time.sleep(0.12)
+                                    pyautogui.mouseUp(retry_x, retry_y)
+
+                                await asyncio.to_thread(retry_mouse)
+                                await asyncio.sleep(0.35)
+                                post_img_retry, _ = await self.capture_screen()
+                                is_verified_r, local_delta_r, global_delta_r = verify_visual_action_delta(
+                                    pre_img=full_img,
+                                    post_img=post_img_retry,
+                                    px=px,
+                                    py=py,
+                                    monitor=monitor
+                                )
+                                effective_delta_r = max(local_delta_r, global_delta_r)
+                                if is_verified_r:
+                                    is_final_verified = True
+                                    effective_delta = effective_delta_r
+                                    await self.send_status(
+                                        f"🎉 Click verified after activation retry on '{action_param.target}' ({effective_delta_r:.1f}Δ)"
+                                    )
+                                    rolling_history.append(types.Content(
+                                        role="user",
+                                        parts=[types.Part(text=f"[ACTION VERIFIED AFTER RETRY] Click on '{action_param.target}' triggered confirmed UI change after activation retry (delta: {effective_delta_r:.1f}).")]
+                                    ))
+                                else:
+                                    await self.send_status(
+                                        f"⚠️ Warning: Element '{action_param.target}' produced no visual change."
+                                    )
+                                    rolling_history.append(types.Content(
+                                        role="user",
+                                        parts=[types.Part(text=(
+                                            f"[ACTION VERIFICATION NOTICE] Click on '{action_param.target}' at ({px}, {py}) produced NO visual change on screen. "
+                                            "The element may be disabled, not focused, or part of a background window. "
+                                            "Advice: Use 'focus_window' to bring the application window to front, use keyboard accelerators/hotkeys, or use CLI tools."
+                                        ))]
+                                    ))
                         elif _action_type == "drag":
-                            await self.send_status(f"🎯 Dragged '{action_param.target}' → '{action_param.destination}'")
+                            await self.send_status(f"🎯 Dragged '{action_param.target}' → '{action_param.destination}' (delta: {effective_delta:.1f}Δ)")
 
                         if crop_b64:
                             await self.send_json({
@@ -2503,9 +2631,11 @@ class AgentLoop:
                                 "y": py,
                                 "bbox": p_bbox,
                                 "crop": crop_b64,
+                                "verified": is_final_verified,
+                                "delta": round(float(effective_delta), 1),
                             })
 
-                        await asyncio.sleep(1.0)  # Wait for UI to respond before next screen capture
+                        await asyncio.sleep(0.5)  # Settle time before next action
 
 
                     else:
