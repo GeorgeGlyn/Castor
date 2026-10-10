@@ -9,11 +9,13 @@ try:
     from .artifacts_manager import artifacts_manager
     from .model_manager import model_manager
     from .task_manager import task_manager
+    from .ast_indexer import ast_indexer
 except ImportError:
     from agent import AgentLoop, get_monitors_info
     from artifacts_manager import artifacts_manager
     from model_manager import model_manager
     from task_manager import task_manager
+    from ast_indexer import ast_indexer
 
 router = APIRouter()
 
@@ -207,6 +209,32 @@ async def get_task_logs(task_id: str, tail: int = 100):
         "logs": task.get_logs(tail=tail),
     }
 
+@router.get("/api/symbols/search")
+async def search_symbols(q: str, kind: Optional[str] = None):
+    results = ast_indexer.find_symbol(q, kind=kind)
+    return {"query": q, "count": len(results), "symbols": [s.to_dict() for s in results]}
+
+@router.get("/api/symbols/outline")
+async def get_symbol_outline(path: str):
+    symbols = ast_indexer.list_file_symbols(path)
+    outline = ast_indexer.get_file_outline(path)
+    return {"path": path, "outline": outline, "symbols": [s.to_dict() for s in symbols]}
+
+@router.post("/api/symbols/reindex")
+async def reindex_symbols(project_path: Optional[str] = None):
+    target = project_path or ast_indexer.project_path or DEFAULT_PROJECTS_DIR
+    res = ast_indexer.index_workspace(target, force=True)
+    return {"success": True, "result": res}
+
+@router.get("/api/symbols/stats")
+async def get_symbol_stats():
+    return {
+        "project_path": ast_indexer.project_path,
+        "total_files": len(ast_indexer.symbols_by_file),
+        "total_symbols": len(ast_indexer.symbols),
+        "last_indexed": ast_indexer.last_indexed,
+    }
+
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[WebSocket, AgentLoop] = {}
@@ -385,6 +413,16 @@ async def websocket_endpoint(websocket: WebSocket):
                     "success": ok,
                     "message": msg,
                     "tasks": task_manager.list_tasks_data(include_logs=False)
+                }, websocket)
+
+            elif action == "search_symbols":
+                q = data.get("query", "")
+                k = data.get("kind")
+                results = ast_indexer.find_symbol(q, kind=k)
+                await manager.send_message({
+                    "type": "symbols_result",
+                    "query": q,
+                    "symbols": [s.to_dict() for s in results[:50]],
                 }, websocket)
 
     except WebSocketDisconnect:
