@@ -17,7 +17,7 @@ try:
     from . import dev_tools
     from .task_manager import task_manager
     from .knowledge_manager import knowledge_manager
-    from .subagent import run_subagent
+    from .subagent import run_subagent, SwarmTask, run_subagent_swarm
     from .compactor import compact_history, append_transcript_step
     from .artifacts_manager import artifacts_manager
     from .checkpoint_manager import checkpoint_manager
@@ -29,7 +29,7 @@ except ImportError:
     import dev_tools
     from task_manager import task_manager
     from knowledge_manager import knowledge_manager
-    from subagent import run_subagent
+    from subagent import run_subagent, SwarmTask, run_subagent_swarm
     from compactor import compact_history, append_transcript_step
     from artifacts_manager import artifacts_manager
     from checkpoint_manager import checkpoint_manager
@@ -169,8 +169,15 @@ class ReplacementChunkItem(BaseModel):
     content: str
 
 
+class SwarmTaskItem(BaseModel):
+    role: str = "Assistant"
+    task: str
+    context: Optional[str] = None
+    model: Optional[str] = None
+
+
 class ActionParams(BaseModel):
-    action: str        # "click" | "drag" | "type" | "hotkey" | "scroll" | "bash" | "done" | "skill" | "run_skill_script" | "view_file" | "write_to_file" | "replace_file_content" | "multi_replace_file_content" | "list_dir" | "grep_search" | "search_web" | "read_url_content" | "list_windows" | "focus_window" | "check_unity_diagnostics" | "schedule" | "create_checkpoint" | "restore_checkpoint" | "list_checkpoints" | "generate_image_asset" | "run_tests" | "read_clipboard" | "set_clipboard" | "read_screen_text" | "switch_monitor" | "ask_question" | "manage_task" | "save_knowledge" | "get_knowledge" | "invoke_subagent" | "create_artifact" | "update_artifact"
+    action: str        # "click" | "drag" | "type" | "hotkey" | "scroll" | "bash" | "done" | "skill" | "run_skill_script" | "view_file" | "write_to_file" | "replace_file_content" | "multi_replace_file_content" | "list_dir" | "grep_search" | "search_web" | "read_url_content" | "list_windows" | "focus_window" | "check_unity_diagnostics" | "schedule" | "create_checkpoint" | "restore_checkpoint" | "list_checkpoints" | "generate_image_asset" | "run_tests" | "read_clipboard" | "set_clipboard" | "read_screen_text" | "switch_monitor" | "ask_question" | "manage_task" | "save_knowledge" | "get_knowledge" | "invoke_subagent" | "spawn_swarm" | "create_artifact" | "update_artifact"
 
 
 
@@ -203,6 +210,7 @@ class ActionParams(BaseModel):
     knowledge_tags: Optional[list[str]] = None             # For save_knowledge
     knowledge_id: Optional[str] = None                    # For get_knowledge
     subagent_prompt: Optional[str] = None                 # For invoke_subagent
+    swarm_tasks: Optional[list[SwarmTaskItem]] = None     # For spawn_swarm (Concurrent Multi-Agent Swarm)
     # Antigravity Living Artifacts:
     artifact_id: Optional[str] = None                     # For update_artifact (e.g. "arch_plan")
     artifact_title: Optional[str] = None                  # For create_artifact
@@ -996,7 +1004,8 @@ class AgentLoop:
             "   - 'manage_task': manage background processes. Set 'task_action' ('status', 'logs', 'kill', 'list') and optional 'task_id' (e.g. 'task-1').\n"
             "   - 'save_knowledge': store architectural patterns, bug fixes, or gotchas into persistent memory. Set 'knowledge_title', 'knowledge_summary', 'content', and optional 'knowledge_tags'.\n"
             "   - 'get_knowledge': retrieve full details of a saved Knowledge Item. Set 'knowledge_id'.\n"
-            "   - 'invoke_subagent': delegate an isolated subtask (code drafting, multi-file research) to a subagent with its own fresh context. Set 'subagent_prompt'.\n"
+            "   - 'invoke_subagent': delegate an isolated subtask (code drafting, multi-file research) to a subagent with its own fresh context. Set 'subagent_prompt' and optional 'target' for role.\n"
+            "   - 'spawn_swarm': spawn multiple specialized subagents concurrently in parallel (e.g. Coder, Tester, Researcher). Set 'swarm_tasks' list of {'role': '...', 'task': '...'}.\n"
             "   - 'ask_question': prompt the user with an interactive multiple-choice question modal when requirements are ambiguous. Set 'questions' list of {'question': '...', 'options': ['...'], 'is_multi_select': bool}.\n"
             "   - 'create_artifact': create an Antigravity-style persistent living document (walkthrough, plan, design spec, or architecture document) stored in .castor/artifacts. Set 'artifact_title', 'artifact_type' ('markdown' | 'code' | 'diagram' | 'diff'), and 'content'.\n"
             "   - 'update_artifact': update an existing living document. Set 'artifact_id' and 'content'.\n"
@@ -2004,13 +2013,25 @@ class AgentLoop:
                         ))
                         await asyncio.sleep(0.2)
 
+                    # Helper for live subagent streaming events to frontend
+                    async def stream_subagent_event(ev: Dict[str, Any]):
+                        try:
+                            await self.websocket.send_json({
+                                "type": "subagent_event",
+                                "event": ev,
+                            })
+                        except Exception:
+                            pass
+
                     # ── invoke_subagent (Subagent Delegation) ────────────────
-                    elif action_type == "invoke_subagent":
+                    if action_type == "invoke_subagent":
                         sub_prompt = action_param.subagent_prompt or action_param.text or action_param.target or ""
                         if not sub_prompt:
                             await self.send_status("⚠️ invoke_subagent requires a subagent_prompt.")
                             continue
-                        await self.send_status(f"🤖 Spawning subagent: {sub_prompt[:80]}...")
+                        sub_role = action_param.target or "Specialist"
+                        s_id = f"sub_{int(time.time()*1000)%10000}"
+                        await self.send_status(f"🤖 Spawning subagent [{sub_role}]: {sub_prompt[:80]}...")
                         ok, sub_report = await run_subagent(
                             task_prompt=sub_prompt,
                             context=f"Parent Goal: {goal}",
@@ -2018,14 +2039,71 @@ class AgentLoop:
                             api_key=self.api_key,
                             model_name=self.planner_model,
                             max_turns=8,
+                            task_id=s_id,
+                            role=sub_role,
+                            on_event=stream_subagent_event,
                         )
                         if ok:
-                            await self.send_status(f"✅ Subagent completed its delegated subtask.")
+                            await self.send_status(f"✅ Subagent [{sub_role}] completed its delegated subtask.")
                         else:
-                            await self.send_status(f"⚠️ Subagent encountered an issue: {sub_report[:100]}")
+                            await self.send_status(f"⚠️ Subagent [{sub_role}] encountered an issue: {sub_report[:100]}")
                         rolling_history.append(types.Content(
                             role="user",
-                            parts=[types.Part(text=f"[SUBAGENT DELEGATION REPORT]\n{sub_report}")],
+                            parts=[types.Part(text=f"[SUBAGENT DELEGATION REPORT - {sub_role}]\n{sub_report}")],
+                        ))
+                        await asyncio.sleep(0.4)
+
+                    # ── spawn_swarm (Concurrent Multi-Agent Swarm) ───────────
+                    elif action_type == "spawn_swarm":
+                        raw_tasks = action_param.swarm_tasks or []
+                        if not raw_tasks:
+                            if action_param.subagent_prompt or action_param.text:
+                                raw_str = action_param.subagent_prompt or action_param.text or ""
+                                try:
+                                    parsed = json.loads(raw_str)
+                                    if isinstance(parsed, list):
+                                        raw_tasks = [SwarmTaskItem(**item) for item in parsed]
+                                except Exception:
+                                    raw_tasks = [SwarmTaskItem(role="Specialist", task=raw_str)]
+
+                        if not raw_tasks:
+                            await self.send_status("⚠️ spawn_swarm requires swarm_tasks list.")
+                            continue
+
+                        swarm_objects = []
+                        for idx, item in enumerate(raw_tasks):
+                            s_role = getattr(item, "role", "Worker") or "Worker"
+                            s_task = getattr(item, "task", "") or str(item)
+                            s_ctx = getattr(item, "context", None) or f"Parent Goal: {goal}"
+                            s_model = getattr(item, "model", None) or self.planner_model
+                            swarm_objects.append(SwarmTask(
+                                task_id=f"swarm_{idx+1}_{int(time.time()*1000)%10000}",
+                                role=s_role,
+                                task_prompt=s_task,
+                                context=s_ctx,
+                                cwd=self.current_project_path,
+                                model_name=s_model,
+                                max_turns=8,
+                            ))
+
+                        roles_preview = ", ".join([s.role for s in swarm_objects])
+                        await self.send_status(f"🐝 Spawning Concurrent Swarm ({len(swarm_objects)} subagents: {roles_preview}) in parallel...")
+
+                        ok, aggregated_report, individual_reports = await run_subagent_swarm(
+                            tasks=swarm_objects,
+                            cwd=self.current_project_path,
+                            api_key=self.api_key,
+                            on_event=stream_subagent_event,
+                        )
+
+                        if ok:
+                            await self.send_status(f"🎉 Swarm finished! All {len(swarm_objects)} subagents completed their tasks.")
+                        else:
+                            await self.send_status(f"⚠️ Swarm completed with partial results. Synthesizing...")
+
+                        rolling_history.append(types.Content(
+                            role="user",
+                            parts=[types.Part(text=f"[CONCURRENT SWARM SYNTHESIS REPORT]\n{aggregated_report}")],
                         ))
                         await asyncio.sleep(0.4)
 
@@ -2321,6 +2399,9 @@ class AgentLoop:
                                     api_key=self.api_key,
                                     model_name=self.planner_model,
                                     max_turns=8,
+                                    task_id="auto_repair_1",
+                                    role="Test Repair Specialist",
+                                    on_event=stream_subagent_event,
                                 )
                                 # Re-verify after repair attempt
                                 ok, res_text = await asyncio.to_thread(

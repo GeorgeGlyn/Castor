@@ -682,6 +682,11 @@ function ChatWindow() {
   const [providerStatusMsg, setProviderStatusMsg] = useState('');
   const [isUpdatingProvider, setIsUpdatingProvider] = useState(false);
 
+  // ── Concurrent Multi-Agent Swarm State ─────────────────────────────────────────
+  const [activeSwarmAgents, setActiveSwarmAgents] = useState({});
+  const [isSwarmPanelExpanded, setIsSwarmPanelExpanded] = useState(true);
+  const [expandedWorkerReports, setExpandedWorkerReports] = useState({});
+
   const fetchProviders = useCallback(async () => {
     try {
       const res = await fetch('http://localhost:8000/api/providers');
@@ -1396,6 +1401,55 @@ function ChatWindow() {
         if (window.electronAPI?.focusMainWindow) {
           window.electronAPI.focusMainWindow();
         }
+      } else if (data.type === 'subagent_event') {
+        const ev = data.event || {};
+        if (ev.type === 'subagent_started') {
+          setActiveSwarmAgents((prev) => ({
+            ...prev,
+            [ev.subagent_id]: {
+              id: ev.subagent_id,
+              role: ev.role || 'Specialist',
+              task: ev.task,
+              status: 'running',
+              turn: 1,
+              thought: 'Starting delegated subtask...',
+              tool: null,
+              report: null,
+            },
+          }));
+        } else if (ev.type === 'subagent_step') {
+          setActiveSwarmAgents((prev) => ({
+            ...prev,
+            [ev.subagent_id]: {
+              ...(prev[ev.subagent_id] || {}),
+              id: ev.subagent_id,
+              role: ev.role || prev[ev.subagent_id]?.role || 'Specialist',
+              turn: ev.turn,
+              thought: ev.thought,
+              tool: ev.tool,
+              status: 'running',
+            },
+          }));
+        } else if (ev.type === 'subagent_completed') {
+          setActiveSwarmAgents((prev) => ({
+            ...prev,
+            [ev.subagent_id]: {
+              ...(prev[ev.subagent_id] || {}),
+              status: 'completed',
+              report: ev.report,
+              turn: ev.turn || prev[ev.subagent_id]?.turn,
+            },
+          }));
+        } else if (ev.type === 'subagent_error') {
+          setActiveSwarmAgents((prev) => ({
+            ...prev,
+            [ev.subagent_id]: {
+              ...(prev[ev.subagent_id] || {}),
+              status: 'failed',
+              error: ev.error,
+            },
+          }));
+        }
       }
 
 
@@ -1685,6 +1739,8 @@ function ChatWindow() {
       setGoal('');
       setAttachedImages([]);
     }
+    setActiveSwarmAgents({});
+    setExpandedWorkerReports({});
     setIsAgentRunning(true);
     setIsThinking(true);
     setThinkingSeconds(0);
@@ -2776,6 +2832,160 @@ function ChatWindow() {
                 <span className="text-[11px] font-mono text-zinc-500 shrink-0 ml-3">
                   {thinkingSeconds}s
                 </span>
+              </div>
+            )}
+
+            {/* Concurrent Multi-Agent Swarm Visualizer */}
+            {Object.keys(activeSwarmAgents).length > 0 && (
+              <div className="bg-[#101015]/90 border border-blue-900/40 rounded-2xl p-4 shadow-xl backdrop-blur-md transition-all duration-200">
+                <div className="flex items-center justify-between pb-3 border-b border-zinc-800/80">
+                  <div className="flex items-center gap-2.5">
+                    <div className="relative flex h-3 w-3 items-center justify-center">
+                      {Object.values(activeSwarmAgents).some((a) => a.status === 'running') ? (
+                        <>
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
+                        </>
+                      ) : (
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                      )}
+                    </div>
+                    <span className="text-xs font-semibold text-zinc-200 tracking-wide flex items-center gap-1.5">
+                      <span>Concurrent Multi-Agent Swarm</span>
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-950/60 text-blue-400 border border-blue-800/50">
+                        {Object.keys(activeSwarmAgents).length} {Object.keys(activeSwarmAgents).length === 1 ? 'Worker' : 'Workers'}
+                      </span>
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {Object.values(activeSwarmAgents).every((a) => a.status === 'completed' || a.status === 'failed') && (
+                      <button
+                        onClick={() => setActiveSwarmAgents({})}
+                        className="text-[11px] font-mono text-zinc-500 hover:text-zinc-300 px-2 py-0.5 rounded hover:bg-zinc-800/50 transition-colors"
+                      >
+                        Dismiss
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setIsSwarmPanelExpanded(!isSwarmPanelExpanded)}
+                      className="text-xs text-zinc-400 hover:text-zinc-200 p-1 rounded hover:bg-zinc-800/60 transition-colors"
+                      title={isSwarmPanelExpanded ? 'Collapse swarm view' : 'Expand swarm view'}
+                    >
+                      {isSwarmPanelExpanded ? '▲' : '▼'}
+                    </button>
+                  </div>
+                </div>
+
+                {isSwarmPanelExpanded && (
+                  <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {Object.values(activeSwarmAgents).map((worker) => {
+                      const isRunning = worker.status === 'running';
+                      const isFailed = worker.status === 'failed';
+                      const isDone = worker.status === 'completed';
+                      const roleLower = (worker.role || '').toLowerCase();
+                      const roleBadge = roleLower.includes('code') || roleLower.includes('dev') || roleLower.includes('impl')
+                        ? { icon: '💻', text: worker.role || 'Coder', cls: 'text-cyan-400 bg-cyan-950/40 border-cyan-800/50' }
+                        : roleLower.includes('test') || roleLower.includes('qa') || roleLower.includes('valid')
+                        ? { icon: '🧪', text: worker.role || 'Tester', cls: 'text-emerald-400 bg-emerald-950/40 border-emerald-800/50' }
+                        : roleLower.includes('doc') || roleLower.includes('research') || roleLower.includes('analy')
+                        ? { icon: '🔬', text: worker.role || 'Researcher', cls: 'text-amber-400 bg-amber-950/40 border-amber-800/50' }
+                        : { icon: '⚡', text: worker.role || 'Specialist', cls: 'text-purple-400 bg-purple-950/40 border-purple-800/50' };
+
+                      const isExpanded = !!expandedWorkerReports[worker.id];
+
+                      return (
+                        <div
+                          key={worker.id}
+                          className={`rounded-xl border p-3 flex flex-col justify-between transition-all ${
+                            isRunning
+                              ? 'bg-[#14141e]/90 border-blue-600/40 shadow-lg shadow-blue-950/20 ring-1 ring-blue-500/20'
+                              : isDone
+                              ? 'bg-[#111216]/80 border-emerald-900/40'
+                              : 'bg-[#181113]/80 border-rose-900/40'
+                          }`}
+                        >
+                          <div>
+                            {/* Card Header */}
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                              <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border flex items-center gap-1 font-medium ${roleBadge.cls}`}>
+                                <span>{roleBadge.icon}</span>
+                                <span>{roleBadge.text}</span>
+                              </span>
+                              <div className="flex items-center gap-1.5">
+                                {isRunning && (
+                                  <span className="flex items-center gap-1 text-[10px] font-mono text-cyan-400 animate-pulse bg-cyan-950/40 px-2 py-0.5 rounded border border-cyan-800/40">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping inline-block" />
+                                    Turn {worker.turn || 1}
+                                  </span>
+                                )}
+                                {isDone && (
+                                  <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-800/40">
+                                    Done ✓
+                                  </span>
+                                )}
+                                {isFailed && (
+                                  <span className="text-[10px] font-mono text-rose-400 bg-rose-950/40 px-2 py-0.5 rounded border border-rose-800/40">
+                                    Failed ✗
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Task Description */}
+                            <p className="text-xs font-mono text-zinc-300 line-clamp-2 mb-2 leading-relaxed font-medium">
+                              {worker.task}
+                            </p>
+
+                            {/* Current Step / Thought */}
+                            {isRunning && worker.thought && (
+                              <div className="bg-zinc-950/60 rounded-lg p-2 border border-zinc-800/60 mb-2">
+                                <p className="text-[11px] font-mono text-zinc-400 italic line-clamp-2">
+                                  "{worker.thought}"
+                                </p>
+                                {worker.tool && (
+                                  <div className="mt-1.5 flex items-center gap-1 text-[10px] font-mono text-blue-400">
+                                    <span>🔧</span>
+                                    <span className="font-semibold">{worker.tool}</span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {isFailed && worker.error && (
+                              <div className="bg-rose-950/30 rounded-lg p-2 border border-rose-800/50 mb-2 text-[11px] font-mono text-rose-300">
+                                {worker.error}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Completed Report Accordion */}
+                          {isDone && worker.report && (
+                            <div className="mt-2 pt-2 border-t border-zinc-800/60">
+                              <button
+                                onClick={() =>
+                                  setExpandedWorkerReports((prev) => ({
+                                    ...prev,
+                                    [worker.id]: !prev[worker.id],
+                                  }))
+                                }
+                                className="w-full flex items-center justify-between text-[11px] font-mono text-zinc-400 hover:text-zinc-200 py-1 transition-colors"
+                              >
+                                <span>{isExpanded ? 'Hide Synthesis Report' : 'View Subagent Report'}</span>
+                                <span>{isExpanded ? '▲' : '▼'}</span>
+                              </button>
+                              {isExpanded && (
+                                <div className="mt-2 p-2.5 bg-zinc-950/80 rounded-lg border border-zinc-800/80 max-h-48 overflow-y-auto text-[11px] font-mono text-zinc-300 whitespace-pre-wrap leading-relaxed select-text">
+                                  {worker.report}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
 
