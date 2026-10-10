@@ -1975,7 +1975,8 @@ class AgentLoop:
                                 parts=[types.Part(text=f"[TASK_MANAGER LIST]\n{task_info}")],
                             ))
                         else:
-                            ok, task_info = task_manager.manage_task(task_act, task_id)
+                            input_text = action_param.content or action_param.text
+                            ok, task_info = task_manager.manage_task(task_act, task_id, input_text=input_text)
                             await self.send_status(f"⚙️ Task '{task_id}': {task_act}")
                             rolling_history.append(types.Content(
                                 role="user",

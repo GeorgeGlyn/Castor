@@ -8,10 +8,12 @@ try:
     from .agent import AgentLoop, get_monitors_info
     from .artifacts_manager import artifacts_manager
     from .model_manager import model_manager
+    from .task_manager import task_manager
 except ImportError:
     from agent import AgentLoop, get_monitors_info
     from artifacts_manager import artifacts_manager
     from model_manager import model_manager
+    from task_manager import task_manager
 
 router = APIRouter()
 
@@ -158,6 +160,53 @@ async def select_provider(req: SetProviderRequest):
         "model": req.model,
     }
 
+class StartTaskRequest(BaseModel):
+    command: str
+    cwd: Optional[str] = None
+    name: Optional[str] = None
+
+class ManageTaskRequest(BaseModel):
+    action: str
+    input_text: Optional[str] = None
+    tail: Optional[int] = 50
+
+@router.get("/api/tasks")
+async def get_all_tasks(include_logs: bool = True, tail: int = 50):
+    return {"tasks": task_manager.list_tasks_data(include_logs=include_logs, tail=tail)}
+
+@router.post("/api/tasks/start")
+async def start_background_task(req: StartTaskRequest):
+    ok, msg = task_manager.start_task(req.command, cwd=req.cwd, name=req.name)
+    return {"success": ok, "message": msg, "tasks": task_manager.list_tasks_data(include_logs=False)}
+
+@router.post("/api/tasks/{task_id}/action")
+async def execute_task_action(task_id: str, req: ManageTaskRequest):
+    ok, msg = task_manager.manage_task(
+        action=req.action,
+        task_id=task_id,
+        tail=req.tail or 50,
+        input_text=req.input_text
+    )
+    return {
+        "success": ok,
+        "message": msg,
+        "tasks": task_manager.list_tasks_data(include_logs=False),
+    }
+
+@router.get("/api/tasks/{task_id}/logs")
+async def get_task_logs(task_id: str, tail: int = 100):
+    task = task_manager.get_task(task_id)
+    if not task:
+        return {"error": f"Task '{task_id}' not found", "logs": ""}
+    return {
+        "task_id": task_id,
+        "name": task.name,
+        "status": task.get_status(),
+        "detected_urls": task.detected_urls,
+        "exit_code": task.exit_code,
+        "logs": task.get_logs(tail=tail),
+    }
+
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[WebSocket, AgentLoop] = {}
@@ -179,6 +228,7 @@ class ConnectionManager:
                 "default_projects_dir": os.path.abspath(DEFAULT_PROJECTS_DIR),
                 "monitors": get_monitors_info(),
                 "active_monitor": agent_loop.monitor_index,
+                "tasks": task_manager.list_tasks_data(include_logs=False),
             })
         except Exception as e:
             print(f"Error sending init state: {e}")
@@ -192,7 +242,37 @@ class ConnectionManager:
     async def send_message(self, message: dict, websocket: WebSocket):
         await websocket.send_json(message)
 
+    async def broadcast(self, message: dict):
+        for ws in list(self.active_connections.keys()):
+            try:
+                await ws.send_json(message)
+            except Exception:
+                pass
+
 manager = ConnectionManager()
+
+def _setup_watchdog_broadcaster():
+    def on_task_event(event_name: str, data: dict):
+        payload = {
+            "type": "task_watchdog_event",
+            "event_name": event_name,
+            "data": data,
+            "tasks": task_manager.list_tasks_data(include_logs=False),
+        }
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(manager.broadcast(payload))
+        except RuntimeError:
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.run_coroutine_threadsafe(manager.broadcast(payload), loop)
+            except Exception:
+                pass
+
+    task_manager.register_event_listener(on_task_event)
+
+_setup_watchdog_broadcaster()
 
 @router.websocket("/ws/agent")
 async def websocket_endpoint(websocket: WebSocket):
@@ -272,6 +352,39 @@ async def websocket_endpoint(websocket: WebSocket):
                     "type": "monitors_list",
                     "monitors": get_monitors_info(),
                     "active_monitor": agent_loop.monitor_index
+                }, websocket)
+
+            elif action == "get_tasks":
+                await manager.send_message({
+                    "type": "tasks_list",
+                    "tasks": task_manager.list_tasks_data(include_logs=True, tail=50)
+                }, websocket)
+
+            elif action == "start_task":
+                cmd = data.get("command", "")
+                t_cwd = data.get("cwd") or agent_loop.current_project_path
+                t_name = data.get("name")
+                ok, msg = task_manager.start_task(cmd, cwd=t_cwd, name=t_name)
+                await manager.send_message({
+                    "type": "task_action_result",
+                    "success": ok,
+                    "message": msg,
+                    "tasks": task_manager.list_tasks_data(include_logs=False)
+                }, websocket)
+
+            elif action == "manage_task":
+                t_id = data.get("task_id", "")
+                t_act = data.get("task_action", "status")
+                t_inp = data.get("input_text")
+                t_tail = data.get("tail", 50)
+                ok, msg = task_manager.manage_task(t_act, t_id, tail=t_tail, input_text=t_inp)
+                await manager.send_message({
+                    "type": "task_action_result",
+                    "task_id": t_id,
+                    "action": t_act,
+                    "success": ok,
+                    "message": msg,
+                    "tasks": task_manager.list_tasks_data(include_logs=False)
                 }, websocket)
 
     except WebSocketDisconnect:
