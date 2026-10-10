@@ -23,6 +23,7 @@ try:
     from .checkpoint_manager import checkpoint_manager
     from .gemini_pool import gemini_pool
     from .ocr_engine import ocr_engine
+    from .model_manager import model_manager
 except ImportError:
     import skills_manager
     import dev_tools
@@ -34,6 +35,7 @@ except ImportError:
     from checkpoint_manager import checkpoint_manager
     from gemini_pool import gemini_pool
     from ocr_engine import ocr_engine
+    from model_manager import model_manager
 from fastapi import WebSocket
 from google import genai
 from google.genai import types
@@ -1279,40 +1281,119 @@ class AgentLoop:
                 trimmed_history = rolling_history[-HISTORY_WINDOW * 2:] if len(rolling_history) > HISTORY_WINDOW * 2 else rolling_history
                 current_history = base_history + trimmed_history + [request_content]
 
-                def call_planner():
+                active_prov = getattr(model_manager, "active_provider", "gemini").lower()
+
+                async def execute_planner_call():
                     current_instruction = planner_system_instruction
                     if self.active_skills_content:
                         current_instruction += "\n\n=== ACTIVATED SKILLS & INSTRUCTIONS (PERMANENT SYSTEM MEMORY) ===\n"
                         for s_name, s_content in self.active_skills_content.items():
                             current_instruction += f"\n--- [SKILL: {s_name.upper()}] ---\n{s_content}\n"
 
-                    return self.generate_content_with_fallback(
-                        primary_model=self.planner_model,
-                        contents=current_history,
-                        config=types.GenerateContentConfig(
-                            system_instruction=current_instruction,
-                            temperature=0.0,
-                            response_mime_type="application/json",
-                            response_schema=PlannerResponse,
-                        ),
-                    )
+                    # Non-Gemini Alternative Providers (Ollama, DeepSeek, OpenAI, Anthropic, OpenRouter)
+                    if active_prov != "gemini":
+                        try:
+                            # Convert scaled_img to base64 JPEG for vision
+                            img_buf = io.BytesIO()
+                            scaled_img.save(img_buf, format="JPEG", quality=85)
+                            screen_b64 = base64.b64encode(img_buf.getvalue()).decode("utf-8")
 
-                await self.send_status(f"🧠 Consulting Gemini ({self.planner_model}) with screen state...")
-                planner_res = await asyncio.to_thread(call_planner)
+                            # Build text prompt of history and current state
+                            hist_text = []
+                            for c in current_history:
+                                for p in (c.parts or []):
+                                    if hasattr(p, "text") and p.text:
+                                        hist_text.append(f"[{c.role.upper()}]: {p.text}")
+                            full_prompt = "\n".join(hist_text) + "\n\nAnalyze the desktop screenshot and emit the next action batch in PlannerResponse JSON format."
+
+                            if active_prov == "ollama":
+                                await self.send_status(f"🦙 Consulting Local Offline Ollama ({model_manager.ollama_model})...")
+                                text_res = await model_manager.call_openai_compatible(
+                                    base_url=model_manager.ollama_base_url,
+                                    api_key="",
+                                    model=model_manager.ollama_model,
+                                    system_instruction=current_instruction,
+                                    prompt_text=full_prompt,
+                                    image_b64=screen_b64,
+                                    schema_json=PlannerResponse.model_json_schema(),
+                                    timeout_seconds=90.0,
+                                )
+                                return text_res
+
+                            elif active_prov in ["openai", "deepseek", "openrouter"]:
+                                p_url = model_manager.deepseek_base_url if active_prov == "deepseek" else (model_manager.openrouter_base_url if active_prov == "openrouter" else model_manager.openai_base_url)
+                                p_key = model_manager.deepseek_api_key if active_prov == "deepseek" else (model_manager.openrouter_api_key if active_prov == "openrouter" else model_manager.openai_api_key)
+                                p_model = model_manager.deepseek_model if active_prov == "deepseek" else (model_manager.openrouter_model if active_prov == "openrouter" else model_manager.openai_model)
+                                await self.send_status(f"🌐 Consulting {active_prov.upper()} ({p_model})...")
+                                text_res = await model_manager.call_openai_compatible(
+                                    base_url=p_url,
+                                    api_key=p_key,
+                                    model=p_model,
+                                    system_instruction=current_instruction,
+                                    prompt_text=full_prompt,
+                                    image_b64=screen_b64,
+                                    schema_json=PlannerResponse.model_json_schema(),
+                                    timeout_seconds=75.0,
+                                )
+                                return text_res
+
+                            elif active_prov == "anthropic":
+                                await self.send_status(f"🧠 Consulting Anthropic ({model_manager.anthropic_model})...")
+                                text_res = await model_manager.call_anthropic(
+                                    api_key=model_manager.anthropic_api_key,
+                                    model=model_manager.anthropic_model,
+                                    system_instruction=current_instruction,
+                                    prompt_text=full_prompt,
+                                    image_b64=screen_b64,
+                                    timeout_seconds=75.0,
+                                )
+                                return text_res
+
+                        except Exception as prov_err:
+                            await self.send_status(f"⚠️ Provider '{active_prov}' unavailable ({prov_err}). Falling back to Gemini Pool...")
+
+                    # Default: Multi-Key Gemini Cloud Failover Pool
+                    gemini_target_model = getattr(model_manager, "gemini_model", None) or self.planner_model
+                    await self.send_status(f"🧠 Consulting Gemini ({gemini_target_model}) with screen state...")
+                    def run_gemini():
+                        return self.generate_content_with_fallback(
+                            primary_model=gemini_target_model,
+                            contents=current_history,
+                            config=types.GenerateContentConfig(
+                                system_instruction=current_instruction,
+                                temperature=0.0,
+                                response_mime_type="application/json",
+                                response_schema=PlannerResponse,
+                            ),
+                        )
+                    res = await asyncio.to_thread(run_gemini)
+                    return res.text
+
+                planner_raw_text = await execute_planner_call()
 
                 if not self.is_running:
                     break
+
+                # Strip markdown code fences if emitted by provider
+                clean_json_str = (planner_raw_text or "").strip()
+                if clean_json_str.startswith("```json"):
+                    clean_json_str = clean_json_str[7:]
+                if clean_json_str.startswith("```"):
+                    clean_json_str = clean_json_str[3:]
+                if clean_json_str.endswith("```"):
+                    clean_json_str = clean_json_str[:-3]
+                clean_json_str = clean_json_str.strip()
 
                 # Update rolling history
                 rolling_history.append(request_content)
                 rolling_history.append(types.Content(
                     role="model",
-                    parts=[types.Part(text=planner_res.text)],
+                    parts=[types.Part(text=clean_json_str)],
                 ))
 
                 # Parse planner output
                 try:
-                    planner_data = json.loads(planner_res.text)
+                    planner_data = json.loads(clean_json_str)
                     planner_response = PlannerResponse(**planner_data)
                 except Exception as e:
                     await self.send_status(f"❌ Failed to parse planner output: {e}")

@@ -673,6 +673,54 @@ function ChatWindow() {
   });
   const [pendingPlan, setPendingPlan] = useState(null);
 
+  // ── Multi-Provider AI Engine State ───────────────────────────────────────────
+  const [availableProviders, setAvailableProviders] = useState([]);
+  const [activeProvider, setActiveProvider] = useState('gemini');
+  const [providerModelInput, setProviderModelInput] = useState('');
+  const [providerApiKeyInput, setProviderApiKeyInput] = useState('');
+  const [providerBaseUrlInput, setProviderBaseUrlInput] = useState('');
+  const [providerStatusMsg, setProviderStatusMsg] = useState('');
+  const [isUpdatingProvider, setIsUpdatingProvider] = useState(false);
+
+  const fetchProviders = useCallback(async () => {
+    try {
+      const res = await fetch('http://localhost:8000/api/providers');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.providers) setAvailableProviders(data.providers);
+        if (data.active_provider) setActiveProvider(data.active_provider);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch providers:', err);
+    }
+  }, []);
+
+  const handleSelectProvider = async (providerId, customModel = '', customKey = '', customBaseUrl = '') => {
+    try {
+      setIsUpdatingProvider(true);
+      setActiveProvider(providerId);
+      const res = await fetch('http://localhost:8000/api/providers/select', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: providerId,
+          model: customModel || undefined,
+          api_key: customKey || undefined,
+          base_url: customBaseUrl || undefined,
+        }),
+      });
+      if (res.ok) {
+        setProviderStatusMsg(`Switched AI engine to ${providerId.toUpperCase()}`);
+        setTimeout(() => setProviderStatusMsg(''), 4000);
+        fetchProviders();
+      }
+    } catch (err) {
+      console.warn('Failed to set provider:', err);
+    } finally {
+      setIsUpdatingProvider(false);
+    }
+  };
+
   // ── Reference Images Upload & Clipboard State ─────────────────────────────
   const [attachedImages, setAttachedImages] = useState([]);
   const fileInputRef = useRef(null);
@@ -1401,7 +1449,9 @@ function ChatWindow() {
         }
       })
       .catch(() => {});
-  }, []);
+
+    fetchProviders();
+  }, [fetchProviders]);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -1885,6 +1935,24 @@ function ChatWindow() {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Multi-Provider AI Engine & Model Selector Badge */}
+            <button
+              onClick={() => {
+                fetchProviders();
+                setIsCustomAgentModalOpen(true);
+              }}
+              className="text-xs px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm border bg-zinc-850 hover:bg-zinc-800 text-zinc-300 hover:text-white border-zinc-750 hover:border-blue-500/50 cursor-pointer"
+              title="Active AI Engine & Model (Click to configure or switch models/providers)"
+            >
+              <span className="text-xs">
+                {activeProvider === 'ollama' ? '🦙' : activeProvider === 'deepseek' ? '🌐' : activeProvider === 'openai' ? '🤖' : activeProvider === 'anthropic' ? '🧠' : activeProvider === 'openrouter' ? '🔀' : '⚡'}
+              </span>
+              <span className="font-medium capitalize">{activeProvider}</span>
+              <span className="text-[10px] text-zinc-400 font-mono hidden sm:inline">
+                ({availableProviders.find((p) => p.id === activeProvider)?.active_model || 'active'})
+              </span>
+            </button>
+
             {/* Multi-Monitor Display Selector */}
             <div className="relative" ref={monitorMenuRef}>
               <button
@@ -3085,17 +3153,18 @@ function ChatWindow() {
         </div>
       </div>
 
-      {/* Configure Custom Agent Modal */}
+      {/* Configure Custom Agent & AI Model Provider Modal */}
       {isCustomAgentModalOpen && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="bg-[#18181b] border border-zinc-750 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150">
-            <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/60">
+          <div className="bg-[#18181b] border border-zinc-750 rounded-2xl w-full max-w-2xl max-h-[88vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/60 shrink-0">
               <div className="flex items-center gap-2.5">
-                <span className="text-lg">⚙️</span>
+                <span className="text-xl">⚙️</span>
                 <div>
-                  <h3 className="text-sm font-semibold text-zinc-100">Configure Custom Agent</h3>
+                  <h3 className="text-sm font-semibold text-zinc-100">Configure Agent & AI Engine</h3>
                   <p className="text-xs text-zinc-400 mt-0.5">
-                    Set persistent rules, system instructions, and coding standards for Castor.
+                    Select AI provider (Gemini failover pool, Local Offline Ollama, DeepSeek, OpenAI, Claude) and customize agent behavior.
                   </p>
                 </div>
               </div>
@@ -3107,9 +3176,263 @@ function ChatWindow() {
               </button>
             </div>
 
-            <div className="p-5 space-y-4">
-              {/* Preset Chips */}
+            {/* Modal Scrollable Body */}
+            <div className="p-5 space-y-5 overflow-y-auto flex-1 custom-scrollbar">
+              {/* Feedback Alert */}
+              {providerStatusMsg && (
+                <div className="p-3 bg-emerald-950/60 border border-emerald-700/60 rounded-xl text-xs text-emerald-200 flex items-center gap-2 animate-in fade-in">
+                  <span>✅</span>
+                  <span>{providerStatusMsg}</span>
+                </div>
+              )}
+
+              {/* Section 1: AI Model Provider Catalog */}
               <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                    <span>🧠</span>
+                    <span>AI Model Engine & Provider:</span>
+                  </label>
+                  <span className="text-[10px] font-mono text-zinc-500">
+                    Astra-Grade Hybrid Provider Routing
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {[
+                    {
+                      id: 'gemini',
+                      name: 'Google Gemini',
+                      badge: 'Failover Key Pool',
+                      icon: '⚡',
+                      desc: 'Native multimodal computer-use with automated multi-key rotation fallback.',
+                      is_local: false,
+                    },
+                    {
+                      id: 'ollama',
+                      name: 'Ollama (Local Offline)',
+                      badge: 'Zero-Cloud Private',
+                      icon: '🦙',
+                      desc: 'Offline execution via local daemon (Qwen 2.5-Coder, Llama 3.2-Vision). Zero data leaves your PC.',
+                      is_local: true,
+                    },
+                    {
+                      id: 'deepseek',
+                      name: 'DeepSeek API',
+                      badge: 'DeepSeek-V3 / R1',
+                      icon: '🌐',
+                      desc: 'High-performance frontier coding and reasoning via official OpenAI-compatible endpoint.',
+                      is_local: false,
+                    },
+                    {
+                      id: 'openai',
+                      name: 'OpenAI API',
+                      badge: 'GPT-4o / o3-mini',
+                      icon: '🤖',
+                      desc: 'Standard frontier computer-use and autonomous planning with structured outputs.',
+                      is_local: false,
+                    },
+                    {
+                      id: 'anthropic',
+                      name: 'Anthropic Claude',
+                      badge: 'Claude 3.7 / 3.5 Sonnet',
+                      icon: '🧠',
+                      desc: 'High-precision computer-use, agentic tool workflows, and surgical code refactoring.',
+                      is_local: false,
+                    },
+                    {
+                      id: 'openrouter',
+                      name: 'OpenRouter',
+                      badge: 'Universal Gateway',
+                      icon: '🔀',
+                      desc: 'Connect to any frontier open-source or proprietary model through single API key.',
+                      is_local: false,
+                    },
+                  ].map((prov) => {
+                    const isSelected = activeProvider === prov.id;
+                    const provInfo = availableProviders.find((p) => p.id === prov.id);
+                    const isOnline = prov.id === 'ollama' ? provInfo?.is_available : true;
+
+                    return (
+                      <div
+                        key={prov.id}
+                        onClick={() => handleSelectProvider(prov.id)}
+                        className={`p-3 rounded-xl border text-left cursor-pointer transition-all relative ${
+                          isSelected
+                            ? 'bg-blue-950/40 border-blue-500 shadow-md ring-1 ring-blue-500/30'
+                            : 'bg-zinc-850/60 border-zinc-750/80 hover:bg-zinc-800 hover:border-zinc-700'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className="text-base">{prov.icon}</span>
+                            <span className="text-xs font-semibold text-zinc-100">{prov.name}</span>
+                          </div>
+                          {isSelected && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-500 text-white shadow-sm">
+                              ACTIVE
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="text-[11px] text-zinc-400 leading-snug line-clamp-2 mb-2">
+                          {prov.desc}
+                        </p>
+
+                        <div className="flex items-center justify-between pt-1 border-t border-zinc-750/40">
+                          <span
+                            className="text-[10px] text-zinc-300 font-mono bg-zinc-800/90 px-1.5 py-0.5 rounded border border-zinc-700/60 truncate max-w-[140px]"
+                            title={provInfo?.active_model || prov.badge}
+                          >
+                            🎯 {provInfo?.active_model || prov.badge}
+                          </span>
+                          {prov.id === 'ollama' ? (
+                            <span
+                              className={`text-[10px] font-mono px-1.5 py-0.5 rounded flex items-center gap-1 ${
+                                isOnline
+                                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                  : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                              }`}
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+                              {isOnline ? 'Online' : 'Offline'}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-zinc-500 font-mono">
+                              {prov.is_local ? 'Local' : 'Cloud'}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Active Provider Model Selection & Engine Parameters */}
+                {(() => {
+                  const currentProvInfo = availableProviders.find((p) => p.id === activeProvider);
+                  const currentModels = currentProvInfo?.models || [];
+                  const activeModelName = currentProvInfo?.active_model || '';
+
+                  return (
+                    <div className="mt-3 p-3.5 bg-zinc-900/90 border border-zinc-800 rounded-xl space-y-3 animate-in fade-in">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                          <span>🎯</span>
+                          <span>Active Model for {activeProvider.toUpperCase()}:</span>
+                          <span className="text-blue-400 font-mono font-medium">
+                            {activeModelName || 'Default'}
+                          </span>
+                        </span>
+                        <span className="text-[10px] font-mono text-zinc-500">
+                          {currentModels.length} models cataloged
+                        </span>
+                      </div>
+
+                      {/* Quick Model Selector Chips */}
+                      {currentModels.length > 0 && (
+                        <div>
+                          <label className="text-[10px] text-zinc-400 block mb-1.5">
+                            Select Model (Click to switch):
+                          </label>
+                          <div className="flex flex-wrap gap-1.5">
+                            {currentModels.map((m) => {
+                              const isCurrent = activeModelName === m;
+                              return (
+                                <button
+                                  key={m}
+                                  type="button"
+                                  onClick={() => handleSelectProvider(activeProvider, m)}
+                                  className={`text-[11px] px-2.5 py-1 rounded-lg border transition-all flex items-center gap-1 ${
+                                    isCurrent
+                                      ? 'bg-blue-600 text-white border-blue-500 font-semibold shadow-sm'
+                                      : 'bg-zinc-800/80 hover:bg-zinc-750 text-zinc-300 hover:text-white border-zinc-700/80'
+                                  }`}
+                                >
+                                  <span>{isCurrent ? '✓' : '•'}</span>
+                                  <span className="font-mono">{m}</span>
+                                  {activeProvider === 'ollama' && m === 'qwen2.5:3b' && (
+                                    <span className="text-[9px] px-1 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                      Installed
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Custom Model ID & Connection Overrides */}
+                      <div className="pt-2 border-t border-zinc-800/60 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="text-[10px] text-zinc-400 block mb-1">
+                            Custom / Unlisted Model ID:
+                          </label>
+                          <input
+                            type="text"
+                            value={providerModelInput}
+                            onChange={(e) => setProviderModelInput(e.target.value)}
+                            placeholder={activeModelName || 'Type model identifier...'}
+                            className="w-full bg-[#121216] border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500 font-mono"
+                          />
+                        </div>
+
+                        {activeProvider === 'ollama' ? (
+                          <div>
+                            <label className="text-[10px] text-zinc-400 block mb-1">Daemon Base URL:</label>
+                            <input
+                              type="text"
+                              value={providerBaseUrlInput}
+                              onChange={(e) => setProviderBaseUrlInput(e.target.value)}
+                              placeholder="http://localhost:11434/v1"
+                              className="w-full bg-[#121216] border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500 font-mono"
+                            />
+                          </div>
+                        ) : activeProvider !== 'gemini' ? (
+                          <div>
+                            <label className="text-[10px] text-zinc-400 block mb-1">API Key Override (Optional):</label>
+                            <input
+                              type="password"
+                              value={providerApiKeyInput}
+                              onChange={(e) => setProviderApiKeyInput(e.target.value)}
+                              placeholder="Enter API Key to override .env"
+                              className="w-full bg-[#121216] border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500 font-mono"
+                            />
+                          </div>
+                        ) : (
+                          <div className="flex items-end pb-1.5">
+                            <span className="text-[10px] text-zinc-500">
+                              Gemini uses your multi-key failover pool.
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex justify-end pt-1">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleSelectProvider(
+                              activeProvider,
+                              providerModelInput.trim() || undefined,
+                              providerApiKeyInput.trim() || undefined,
+                              providerBaseUrlInput.trim() || undefined
+                            )
+                          }
+                          disabled={isUpdatingProvider}
+                          className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors"
+                        >
+                          {isUpdatingProvider ? 'Updating...' : 'Apply Model & Overrides'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Section 2: Preset Chips */}
+              <div className="pt-2 border-t border-zinc-800/80">
                 <label className="text-xs font-semibold text-zinc-300 block mb-2">
                   Quick Rule Presets (Click to insert):
                 </label>
@@ -3137,7 +3460,7 @@ function ChatWindow() {
                 </div>
               </div>
 
-              {/* Textarea */}
+              {/* Section 3: Custom System Instructions Textarea */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-xs font-semibold text-zinc-300">
@@ -3148,7 +3471,7 @@ function ChatWindow() {
                   </span>
                 </div>
                 <textarea
-                  rows={6}
+                  rows={5}
                   value={customInstructions}
                   onChange={(e) => setCustomInstructions(e.target.value)}
                   placeholder="e.g. Always write clean modular functions, follow PEP 8 for Python, prioritize Tailwind CSS for styling..."
@@ -3157,7 +3480,8 @@ function ChatWindow() {
               </div>
             </div>
 
-            <div className="px-5 py-3.5 bg-zinc-900/60 border-t border-zinc-800 flex items-center justify-between">
+            {/* Modal Footer */}
+            <div className="px-5 py-3.5 bg-zinc-900/60 border-t border-zinc-800 flex items-center justify-between shrink-0">
               <button
                 type="button"
                 onClick={() => {
@@ -3168,7 +3492,7 @@ function ChatWindow() {
                 }}
                 className="text-xs text-zinc-500 hover:text-red-400 transition-colors"
               >
-                Reset to Default
+                Reset Instructions
               </button>
 
               <div className="flex items-center gap-2">
@@ -3190,7 +3514,7 @@ function ChatWindow() {
                   }}
                   className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold shadow-md transition-colors"
                 >
-                  Save Instructions
+                  Save & Close
                 </button>
               </div>
             </div>
