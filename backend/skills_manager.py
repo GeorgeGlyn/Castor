@@ -8,6 +8,8 @@ Discovers, indexes, and loads procedural skills and project rules across multi-t
 
 import os
 import re
+import shutil
+import json
 import subprocess
 import sys
 from typing import Dict, List, Optional, Tuple
@@ -348,3 +350,202 @@ async def get_or_create_skills_for_goal(
         return [skill_name]
 
     return []
+
+
+def create_custom_skill(
+    name: str,
+    description: str,
+    triggers: List[str],
+    content: str,
+    scope: str = "workspace",
+    project_path: Optional[str] = None,
+    scripts: Optional[Dict[str, str]] = None,
+) -> Tuple[bool, str, Optional[dict]]:
+    """Create a new modular custom skill with SKILL.md and optional executable scripts."""
+    clean_name = re.sub(r"[^a-z0-9_-]", "", name.lower().strip().replace(" ", "-"))
+    if not clean_name:
+        return False, "Skill name must contain valid alphanumeric or dash characters.", None
+
+    if scope == "workspace":
+        if not project_path or not os.path.isdir(project_path):
+            return False, "Workspace scope requires a valid active project directory.", None
+        target_root = os.path.join(project_path, ".castor", "skills")
+    elif scope == "builtin":
+        target_root = BUILTIN_SKILLS_DIR
+    else:
+        target_root = GLOBAL_SKILLS_DIR
+
+    os.makedirs(target_root, exist_ok=True)
+    skill_dir = os.path.join(target_root, clean_name)
+    os.makedirs(skill_dir, exist_ok=True)
+
+    # Format triggers
+    trigger_list_str = "[" + ", ".join([f'"{t.strip()}"' for t in triggers if t.strip()]) + "]"
+
+    # Prepare SKILL.md
+    if not content.strip().startswith("---"):
+        skill_md_text = f"""---
+name: {clean_name}
+description: {description.strip()}
+triggers: {trigger_list_str}
+version: 1.0.0
+---
+
+{content.strip()}
+"""
+    else:
+        skill_md_text = content.strip()
+
+    skill_file = os.path.join(skill_dir, "SKILL.md")
+    try:
+        with open(skill_file, "w", encoding="utf-8") as f:
+            f.write(skill_md_text)
+
+        # Write scripts if provided
+        if scripts and isinstance(scripts, dict):
+            scripts_dir = os.path.join(skill_dir, "scripts")
+            os.makedirs(scripts_dir, exist_ok=True)
+            for s_name, s_code in scripts.items():
+                s_path = os.path.join(scripts_dir, s_name)
+                with open(s_path, "w", encoding="utf-8") as sf:
+                    sf.write(s_code)
+
+        parsed = parse_skill_file(skill_file, scope=scope)
+        return True, f"Successfully created skill '{clean_name}' in {scope} scope.", parsed
+    except Exception as e:
+        return False, f"Error saving skill '{clean_name}': {e}", None
+
+
+def delete_custom_skill(
+    name: str,
+    scope: str = "workspace",
+    project_path: Optional[str] = None,
+) -> Tuple[bool, str]:
+    """Delete a custom skill directory from workspace or global scope."""
+    clean_name = re.sub(r"[^a-z0-9_-]", "", name.lower().strip())
+    if scope == "builtin":
+        return False, "Cannot delete built-in system skills."
+
+    if scope == "workspace":
+        if not project_path:
+            return False, "Workspace project path is required."
+        skill_dir = os.path.join(project_path, ".castor", "skills", clean_name)
+        if not os.path.isdir(skill_dir):
+            skill_dir = os.path.join(project_path, ".agents", "skills", clean_name)
+    else:
+        skill_dir = os.path.join(GLOBAL_SKILLS_DIR, clean_name)
+
+    if not os.path.isdir(skill_dir):
+        return False, f"Skill '{clean_name}' not found in {scope} scope."
+
+    try:
+        shutil.rmtree(skill_dir)
+        return True, f"Successfully deleted skill '{clean_name}'."
+    except Exception as e:
+        return False, f"Failed to delete skill '{clean_name}': {e}"
+
+
+def distill_workflow_to_skill(
+    goal: str,
+    completed_steps: List[str],
+    client=None,
+    model: str = "gemini-flash-lite-latest",
+    scope: str = "workspace",
+    project_path: Optional[str] = None,
+) -> Tuple[bool, str, Optional[dict]]:
+    """
+    Distills a completed execution trajectory into a permanent reusable skill playbook.
+    Uses AI reflection to format triggers, instructions, and procedural steps.
+    """
+    if not completed_steps:
+        return False, "Cannot distill an empty workflow. No steps were completed.", None
+
+    steps_text = "\n".join([f"{i+1}. {s}" for i, s in enumerate(completed_steps)])
+
+    prompt = f"""You are an Expert AI Systems Architect and Skill Distillation Engine.
+The user previously accomplished the following goal:
+"{goal}"
+
+The chronological executed steps were:
+{steps_text}
+
+Instructions:
+1. Synthesize a reusable, highly modular Skill document (SKILL.md) that encodes this workflow so any future AI agent or developer can repeat this process cleanly without trial and error.
+2. Provide:
+   - A concise kebab-case skill name (e.g. 'godot-csharp-build', 'react-tailwind-setup', 'sqlite-migration-pipeline').
+   - One-line description.
+   - 3-5 trigger keywords.
+   - Clear markdown sections:
+     - 🎯 Goal & Overview
+     - 📋 Prerequisites & Tools Required
+     - 🚀 Step-by-Step Execution Workflow
+     - ⚠️ Common Pitfalls & Troubleshooting
+     - ✅ Verification / Testing Procedure
+
+Format your response EXACTLY as follows:
+SKILL_NAME: <kebab-case-name>
+DESCRIPTION: <one-line summary>
+TRIGGERS: [<comma-separated keywords>]
+---
+<Full Markdown Guide Content>
+"""
+
+    if client:
+        try:
+            res = client.models.generate_content(
+                model=model,
+                contents=[prompt],
+            )
+            raw = res.text.strip()
+            lines = raw.splitlines()
+            s_name = "custom-playbook"
+            s_desc = f"Playbook for: {goal[:50]}"
+            s_triggers = ["playbook", "workflow"]
+            content_start = 0
+
+            for idx, line in enumerate(lines):
+                if line.startswith("SKILL_NAME:"):
+                    s_name = line.replace("SKILL_NAME:", "").strip().lower()
+                    s_name = re.sub(r"[^a-z0-9_-]", "", s_name)
+                elif line.startswith("DESCRIPTION:"):
+                    s_desc = line.replace("DESCRIPTION:", "").strip()
+                elif line.startswith("TRIGGERS:"):
+                    raw_trig = line.replace("TRIGGERS:", "").strip().strip("[]")
+                    s_triggers = [t.strip().strip("'\"") for t in raw_trig.split(",") if t.strip()]
+                elif line.startswith("---"):
+                    content_start = idx + 1
+                    break
+
+            body_content = "\n".join(lines[content_start:]).strip() if content_start > 0 else raw
+            return create_custom_skill(
+                name=s_name,
+                description=s_desc,
+                triggers=s_triggers,
+                content=body_content,
+                scope=scope,
+                project_path=project_path,
+            )
+        except Exception as e:
+            print(f"[SkillsManager] Error during AI workflow distillation: {e}")
+
+    # Fallback heuristic distillation without AI model
+    clean_slug = re.sub(r"[^a-z0-9_-]", "", goal.lower().replace(" ", "-"))[:25] or "session-workflow"
+    body = f"""# {goal.title()} Playbook
+
+## 🎯 Overview
+Auto-distilled procedural workflow for task: `{goal}`.
+
+## 🚀 Procedure Steps
+{steps_text}
+
+## ✅ Verification
+Verify all steps completed with zero errors and test final output.
+"""
+    return create_custom_skill(
+        name=clean_slug,
+        description=f"Auto-distilled playbook for '{goal[:40]}'",
+        triggers=[clean_slug, "playbook"],
+        content=body,
+        scope=scope,
+        project_path=project_path,
+    )

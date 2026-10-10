@@ -923,9 +923,32 @@ class AgentLoop:
         if clean_goal.startswith("/learn"):
             learn_text = clean_goal.replace("/learn", "", 1).strip()
             if not learn_text:
-                await self.send_status("⚠️ /learn requires content (e.g. /learn Always use TextMeshPro in Unity)")
+                await self.send_status("⚠️ /learn requires content (e.g. /learn Always use TextMeshPro in Unity or /learn skill <name>)")
                 await self.websocket.send_json({"type": "goal_complete"})
                 return
+
+            if learn_text.startswith("skill"):
+                skill_req = learn_text.replace("skill", "", 1).strip()
+                await self.send_status(f"⚡ Synthesizing reusable skill playbook: '{skill_req or 'Workflow'}'...")
+                recent_steps = self.current_scratchpad.get("completed_steps", []) if self.current_scratchpad else []
+                ok, s_msg, skill_data = skills_manager.distill_workflow_to_skill(
+                    goal=skill_req or "Custom Workflow",
+                    completed_steps=recent_steps or [f"Executed custom task: {skill_req}"],
+                    client=self.client,
+                    scope="workspace",
+                    project_path=self.current_project_path,
+                )
+                if ok and skill_data:
+                    await self.websocket.send_json({
+                        "type": "agent_response",
+                        "text": f"✨ **Reusable Skill Playbook Created & Activated**\n\n**Name:** `{skill_data['name']}`\n**Scope:** `workspace` (`.castor/skills/{skill_data['name']}`)\n**Triggers:** {', '.join(skill_data.get('triggers', []))}\n\n```markdown\n{skill_data.get('content', '')[:1000]}\n```"
+                    })
+                    await self.send_status(f"✅ Reusable skill '{skill_data['name']}' ready.")
+                else:
+                    await self.send_status(f"⚠️ {s_msg}")
+                await self.websocket.send_json({"type": "goal_complete"})
+                return
+
             await self.send_status(f"🧠 Saving persistent knowledge: {learn_text[:60]}...")
             ok, k_msg = knowledge_manager.save_knowledge(
                 title=f"Insight: {learn_text[:40]}",
@@ -1654,6 +1677,14 @@ class AgentLoop:
                             await self.send_status("📋 Plan ready for review! Click 'Proceed with Plan' to execute.")
                         else:
                             await self.send_status("✅ Goal achieved!")
+                            # Suggest workflow distillation for non-trivial trajectories
+                            completed_steps = self.current_scratchpad.get("completed_steps", []) if self.current_scratchpad else []
+                            if len(completed_steps) >= 3 and active_mode != "plan":
+                                await self.websocket.send_json({
+                                    "type": "workflow_distill_suggestion",
+                                    "goal": clean_goal,
+                                    "steps_count": len(completed_steps),
+                                })
 
                         await self.websocket.send_json({"type": "goal_complete"})
                         self.is_running = False

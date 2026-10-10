@@ -13,6 +13,8 @@ try:
     from .checkpoint_manager import checkpoint_manager
     from .diagnostic_engine import diagnostic_engine
     from .guardrail_manager import guardrail_manager
+    from . import skills_manager
+    from .knowledge_manager import knowledge_manager
 except ImportError:
     from agent import AgentLoop, get_monitors_info
     from artifacts_manager import artifacts_manager
@@ -22,6 +24,8 @@ except ImportError:
     from checkpoint_manager import checkpoint_manager
     from diagnostic_engine import diagnostic_engine
     from guardrail_manager import guardrail_manager
+    import skills_manager
+    from knowledge_manager import knowledge_manager
 
 router = APIRouter()
 
@@ -275,6 +279,105 @@ async def check_guardrails_endpoint(req: GuardrailCheckRequest):
             "reason": reason,
         }
     return {"safe": True, "is_destructive": False, "is_sensitive": False, "severity": "low", "reason": ""}
+
+# ── Phase 12: Self-Evolving Skills & Persistent Learned Playbooks ─────────────
+
+class CreateSkillRequest(BaseModel):
+    name: str
+    description: str
+    triggers: list[str] = []
+    content: str
+    scope: str = "workspace"
+    project_path: Optional[str] = None
+    scripts: Optional[Dict[str, str]] = None
+
+class DistillSkillRequest(BaseModel):
+    goal: str
+    steps: list[str]
+    scope: str = "workspace"
+    project_path: Optional[str] = None
+
+class CreateKnowledgeRequest(BaseModel):
+    title: str
+    summary: Optional[str] = ""
+    content: str
+    tags: list[str] = []
+    project_path: Optional[str] = None
+
+@router.get("/api/skills")
+async def list_skills(project_path: Optional[str] = None):
+    all_skills = skills_manager.get_all_skills(project_path)
+    return {
+        "skills": list(all_skills.values()),
+        "total": len(all_skills),
+    }
+
+@router.post("/api/skills/create")
+async def create_skill_endpoint(req: CreateSkillRequest):
+    ok, msg, skill_data = skills_manager.create_custom_skill(
+        name=req.name,
+        description=req.description,
+        triggers=req.triggers,
+        content=req.content,
+        scope=req.scope,
+        project_path=req.project_path,
+        scripts=req.scripts,
+    )
+    return {"success": ok, "message": msg, "skill": skill_data}
+
+@router.post("/api/skills/distill")
+async def distill_skill_endpoint(req: DistillSkillRequest):
+    client = None
+    try:
+        api_key = os.getenv("GEMINI_API_KEY")
+        if api_key:
+            from google import genai
+            client = genai.Client(api_key=api_key)
+    except Exception:
+        pass
+
+    ok, msg, skill_data = skills_manager.distill_workflow_to_skill(
+        goal=req.goal,
+        completed_steps=req.steps,
+        client=client,
+        scope=req.scope,
+        project_path=req.project_path,
+    )
+    return {"success": ok, "message": msg, "skill": skill_data}
+
+@router.delete("/api/skills/{skill_name}")
+async def delete_skill_endpoint(
+    skill_name: str,
+    scope: str = "workspace",
+    project_path: Optional[str] = None,
+):
+    ok, msg = skills_manager.delete_custom_skill(skill_name, scope, project_path)
+    return {"success": ok, "message": msg}
+
+@router.get("/api/knowledge")
+async def list_knowledge(project_path: Optional[str] = None):
+    items = knowledge_manager.load_all_knowledge(project_path, project_path)
+    return {"knowledge": items, "total": len(items)}
+
+@router.post("/api/knowledge")
+async def create_knowledge_endpoint(req: CreateKnowledgeRequest):
+    ok, msg = knowledge_manager.save_knowledge(
+        title=req.title,
+        summary=req.summary or req.title,
+        content=req.content,
+        tags=req.tags,
+        workspace_path=req.project_path,
+        project_path=req.project_path,
+    )
+    return {"success": ok, "message": msg}
+
+@router.delete("/api/knowledge/{item_id}")
+async def delete_knowledge_endpoint(
+    item_id: str,
+    project_path: Optional[str] = None,
+):
+    ok, msg = knowledge_manager.delete_knowledge(item_id, project_path, project_path)
+    return {"success": ok, "message": msg}
  
 @router.get("/api/providers")
 async def list_providers():

@@ -966,14 +966,294 @@ const LiveArtifactSandbox = ({ artifact, isMaximized, onToggleMaximize }) => {
   );
 };
 
-// ── Artifacts & Action Replay Sidecar Drawer (Antigravity Parity) ──────────
-const SidecarDrawer = ({ isOpen, onClose, artifacts, activeArtifact, onSelectArtifact, scratchpad }) => {
-  const [activeTab, setActiveTab] = useState('artifacts');
+// ── Artifacts, Action Replay & Skills Sidecar Drawer (Phase 12 Parity) ─────
+const SidecarDrawer = ({
+  isOpen,
+  onClose,
+  artifacts = [],
+  activeArtifact,
+  onSelectArtifact,
+  scratchpad,
+  activeTab: controlledTab,
+  setActiveTab: setControlledTab,
+  activeProject,
+  currentGoal,
+  distillInitialData,
+  setDistillInitialData,
+}) => {
+  const [internalTab, setInternalTab] = useState('artifacts');
+  const activeTab = controlledTab || internalTab;
+  const setActiveTab = setControlledTab || setInternalTab;
   const [isMaximized, setIsMaximized] = useState(false);
+
+  // Skills & Playbooks State
+  const [skills, setSkills] = useState([]);
+  const [isLoadingSkills, setIsLoadingSkills] = useState(false);
+  const [skillFilterScope, setSkillFilterScope] = useState('all');
+  const [skillSearchQuery, setSkillSearchQuery] = useState('');
+  const [expandedSkillNames, setExpandedSkillNames] = useState({});
+  const [skillsSubTab, setSkillsSubTab] = useState('skills'); // 'skills' | 'knowledge'
+
+  // Knowledge Items State
+  const [knowledgeItems, setKnowledgeItems] = useState([]);
+  const [isLoadingKnowledge, setIsLoadingKnowledge] = useState(false);
+  const [isAddingKnowledge, setIsAddingKnowledge] = useState(false);
+  const [newKnowledgeContent, setNewKnowledgeContent] = useState('');
+  const [newKnowledgeCategory, setNewKnowledgeCategory] = useState('general');
+  const [isKnowledgeLoading, setIsKnowledgeLoading] = useState(false);
+
+  // Distillation Modal State
+  const [isDistillOpen, setIsDistillOpen] = useState(false);
+  const [distillName, setDistillName] = useState('');
+  const [distillScope, setDistillScope] = useState('workspace');
+  const [distillStatus, setDistillStatus] = useState('');
+  const [isDistillLoading, setIsDistillLoading] = useState(false);
+
+  // Manual Skill Creation State
+  const [isCreatingSkill, setIsCreatingSkill] = useState(false);
+  const [newSkillForm, setNewSkillForm] = useState({
+    name: '',
+    description: '',
+    triggers: '',
+    content: '',
+    scope: 'workspace',
+  });
+  const [isCreatingLoading, setIsCreatingLoading] = useState(false);
+  const [createError, setCreateError] = useState('');
+
+  const completedSteps = scratchpad?.completed_steps || [];
+
+  // Fetch Skills
+  const fetchSkills = useCallback(async () => {
+    try {
+      setIsLoadingSkills(true);
+      const projParam = activeProject?.path ? `?project_path=${encodeURIComponent(activeProject.path)}` : '';
+      const res = await fetch(`http://localhost:8000/api/skills${projParam}`);
+      if (res.ok) {
+        const data = await res.json();
+        setSkills(data.skills || []);
+      }
+    } catch (err) {
+      console.warn('Failed to load skills:', err);
+    } finally {
+      setIsLoadingSkills(false);
+    }
+  }, [activeProject?.path]);
+
+  // Fetch Knowledge
+  const fetchKnowledge = useCallback(async () => {
+    try {
+      setIsLoadingKnowledge(true);
+      const projParam = activeProject?.path ? `?project_path=${encodeURIComponent(activeProject.path)}` : '';
+      const res = await fetch(`http://localhost:8000/api/knowledge${projParam}`);
+      if (res.ok) {
+        const data = await res.json();
+        setKnowledgeItems(data.items || []);
+      }
+    } catch (err) {
+      console.warn('Failed to load knowledge:', err);
+    } finally {
+      setIsLoadingKnowledge(false);
+    }
+  }, [activeProject?.path]);
+
+  // Load when drawer opens or activeTab switches to skills
+  useEffect(() => {
+    if (isOpen && activeTab === 'skills') {
+      fetchSkills();
+      fetchKnowledge();
+    }
+  }, [isOpen, activeTab, fetchSkills, fetchKnowledge]);
+
+  // Handle auto-opening distillation when distillInitialData arrives
+  useEffect(() => {
+    if (distillInitialData) {
+      const defaultName = (distillInitialData.suggestedName || distillInitialData.goal || 'workflow')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 32);
+      setDistillName(defaultName);
+      setIsDistillOpen(true);
+      setActiveTab('skills');
+    }
+  }, [distillInitialData, setActiveTab]);
+
+  const handleOpenDistill = () => {
+    const rawGoal = distillInitialData?.goal || currentGoal || 'workflow-playbook';
+    const defaultName = rawGoal
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 32);
+    setDistillName(defaultName || 'workflow-playbook');
+    setDistillStatus('');
+    setIsDistillOpen(true);
+  };
+
+  const handleDistillSubmit = async () => {
+    if (completedSteps.length === 0) {
+      setDistillStatus('No completed steps available to distill.');
+      return;
+    }
+    try {
+      setIsDistillLoading(true);
+      setDistillStatus('Reflecting with Gemini AI to distill triggers and procedure...');
+      const res = await fetch('http://localhost:8000/api/skills/distill', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          completed_steps: completedSteps,
+          goal: distillInitialData?.goal || currentGoal || 'Task Execution Workflow',
+          skill_name: distillName.trim() || undefined,
+          scope: distillScope,
+          project_path: activeProject?.path || null,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setDistillStatus(`✨ Playbook "${data.skill?.name}" distilled successfully!`);
+        playSoundCue('success');
+        if (setDistillInitialData) setDistillInitialData(null);
+        setTimeout(() => {
+          setIsDistillOpen(false);
+          setDistillStatus('');
+        }, 1500);
+        await fetchSkills();
+      } else {
+        setDistillStatus(`❌ Distillation failed: ${data.message}`);
+      }
+    } catch (err) {
+      setDistillStatus(`❌ Error: ${err.message}`);
+    } finally {
+      setIsDistillLoading(false);
+    }
+  };
+
+  const handleDeleteSkill = async (skillName, scope) => {
+    if (!window.confirm(`Delete skill "${skillName}" from ${scope} scope?`)) return;
+    try {
+      const projParam = activeProject?.path ? `&project_path=${encodeURIComponent(activeProject.path)}` : '';
+      const res = await fetch(`http://localhost:8000/api/skills/${encodeURIComponent(skillName)}?scope=${scope}${projParam}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (data.success) {
+        await fetchSkills();
+      } else {
+        alert(data.message || 'Failed to delete skill');
+      }
+    } catch (err) {
+      console.warn('Failed to delete skill:', err);
+    }
+  };
+
+  const handleCreateSkillSubmit = async (e) => {
+    e.preventDefault();
+    if (!newSkillForm.name.trim()) {
+      setCreateError('Skill name is required');
+      return;
+    }
+    try {
+      setIsCreatingLoading(true);
+      setCreateError('');
+      const triggersArray = newSkillForm.triggers
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean);
+
+      const res = await fetch('http://localhost:8000/api/skills/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newSkillForm.name.trim(),
+          description: newSkillForm.description.trim(),
+          triggers: triggersArray,
+          content: newSkillForm.content.trim(),
+          scope: newSkillForm.scope,
+          project_path: activeProject?.path || null,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setIsCreatingSkill(false);
+        setNewSkillForm({ name: '', description: '', triggers: '', content: '', scope: 'workspace' });
+        await fetchSkills();
+      } else {
+        setCreateError(data.message || 'Failed to create skill');
+      }
+    } catch (err) {
+      setCreateError(err.message);
+    } finally {
+      setIsCreatingLoading(false);
+    }
+  };
+
+  const handleAddKnowledgeSubmit = async (e) => {
+    e.preventDefault();
+    if (!newKnowledgeContent.trim()) return;
+    try {
+      setIsKnowledgeLoading(true);
+      const res = await fetch('http://localhost:8000/api/knowledge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: newKnowledgeContent.trim(),
+          category: newKnowledgeCategory,
+          project_path: activeProject?.path || null,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setNewKnowledgeContent('');
+        setIsAddingKnowledge(false);
+        await fetchKnowledge();
+      }
+    } catch (err) {
+      console.warn('Failed to save knowledge:', err);
+    } finally {
+      setIsKnowledgeLoading(false);
+    }
+  };
+
+  const handleDeleteKnowledge = async (itemId) => {
+    try {
+      const projParam = activeProject?.path ? `?project_path=${encodeURIComponent(activeProject.path)}` : '';
+      const res = await fetch(`http://localhost:8000/api/knowledge/${encodeURIComponent(itemId)}${projParam}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (data.success) {
+        await fetchKnowledge();
+      }
+    } catch (err) {
+      console.warn('Failed to delete knowledge item:', err);
+    }
+  };
+
+  const toggleSkillExpand = (name) => {
+    setExpandedSkillNames((prev) => ({
+      ...prev,
+      [name]: !prev[name],
+    }));
+  };
+
+  // Filter skills
+  const filteredSkills = skills.filter((s) => {
+    if (skillFilterScope !== 'all' && s.scope !== skillFilterScope) return false;
+    if (skillSearchQuery.trim()) {
+      const q = skillSearchQuery.toLowerCase();
+      const matchName = (s.name || '').toLowerCase().includes(q);
+      const matchDesc = (s.description || '').toLowerCase().includes(q);
+      const matchTrig = Array.isArray(s.triggers) && s.triggers.some((t) => t.toLowerCase().includes(q));
+      if (!matchName && !matchDesc && !matchTrig) return false;
+    }
+    return true;
+  });
+
   if (!isOpen) return null;
 
   const current = activeArtifact || artifacts[0] || null;
-  const completedSteps = scratchpad?.completed_steps || [];
 
   return (
     <>
@@ -989,37 +1269,50 @@ const SidecarDrawer = ({ isOpen, onClose, artifacts, activeArtifact, onSelectArt
         className={`fixed bg-[#0d0d10] border-zinc-800 shadow-2xl z-40 flex flex-col transition-all duration-200 ${
           isMaximized
             ? 'inset-3 md:inset-6 rounded-2xl border border-blue-500/30 overflow-hidden ring-1 ring-blue-500/20'
-            : 'inset-y-0 right-0 w-full sm:w-[540px] lg:w-[680px] border-l animate-in slide-in-from-right'
+            : 'inset-y-0 right-0 w-full sm:w-[560px] lg:w-[720px] border-l animate-in slide-in-from-right'
         }`}
       >
-        {/* Drawer Header with Dual Tabs */}
+        {/* Drawer Header with Triple Tabs */}
         <div className="h-12 px-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/90 shrink-0">
           <div className="flex items-center gap-1.5 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
             <button
               type="button"
               onClick={() => setActiveTab('artifacts')}
-              className={`px-3 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all ${
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all ${
                 activeTab === 'artifacts'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-zinc-400 hover:text-zinc-200'
               }`}
             >
               <span>📄</span>
-              <span>Artifacts Sandbox</span>
+              <span>Artifacts</span>
               <span className="text-[10px] font-mono opacity-80">({artifacts.length})</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('timeline')}
-              className={`px-3 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all ${
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all ${
                 activeTab === 'timeline'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-zinc-400 hover:text-zinc-200'
               }`}
             >
               <span>⏪</span>
-              <span>Action Replay</span>
+              <span>Replay</span>
               <span className="text-[10px] font-mono opacity-80">({completedSteps.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('skills')}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                activeTab === 'skills'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <span>🧠</span>
+              <span>Skills & Playbooks</span>
+              <span className="text-[10px] font-mono opacity-80">({skills.length})</span>
             </button>
           </div>
 
@@ -1095,8 +1388,17 @@ const SidecarDrawer = ({ isOpen, onClose, artifacts, activeArtifact, onSelectArt
             {completedSteps.length > 0 ? (
               <div className="space-y-2.5">
                 <div className="flex items-center justify-between pb-2 border-b border-zinc-800/60 text-xs text-zinc-400">
-                  <span className="font-semibold text-zinc-300">Chronological Execution Log</span>
-                  <span className="font-mono text-[10px] text-zinc-500">{completedSteps.length} Total Steps</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-zinc-300">Chronological Execution Log</span>
+                    <span className="font-mono text-[10px] text-zinc-500">({completedSteps.length} Steps)</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleOpenDistill}
+                    className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-semibold transition-colors flex items-center gap-1"
+                  >
+                    <span>⚡ Distill to Skill</span>
+                  </button>
                 </div>
                 {completedSteps.map((step, idx) => (
                   <div
@@ -1126,6 +1428,502 @@ const SidecarDrawer = ({ isOpen, onClose, artifacts, activeArtifact, onSelectArt
                 </p>
               </div>
             )}
+          </div>
+        )}
+
+        {/* ── TAB 3: Skills & Playbooks View (Phase 12 Parity) ── */}
+        {activeTab === 'skills' && (
+          <div className="flex-1 flex flex-col min-h-0 bg-[#0c0c0f]">
+            {/* Sub-header navigation: Skills Playbooks vs Learned Insights */}
+            <div className="px-4 py-2.5 border-b border-zinc-800 flex items-center justify-between bg-zinc-950/60 shrink-0 gap-2">
+              <div className="flex items-center gap-1 bg-zinc-900 p-0.5 rounded-lg border border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setSkillsSubTab('skills')}
+                  className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                    skillsSubTab === 'skills'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  Playbooks ({skills.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSkillsSubTab('knowledge')}
+                  className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                    skillsSubTab === 'knowledge'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  Insights ({knowledgeItems.length})
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                {skillsSubTab === 'skills' ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={completedSteps.length === 0}
+                      onClick={handleOpenDistill}
+                      title={
+                        completedSteps.length === 0
+                          ? 'Execute a task to distill its execution replay into a playbook'
+                          : 'Distill recent execution steps into a skill'
+                      }
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 border transition-all ${
+                        completedSteps.length > 0
+                          ? 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border-amber-500/40 cursor-pointer shadow-sm'
+                          : 'bg-zinc-900 text-zinc-600 border-zinc-800 cursor-not-allowed opacity-60'
+                      }`}
+                    >
+                      <span>⚡ Distill Replay</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsCreatingSkill((prev) => !prev)}
+                      className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/40 transition-colors flex items-center gap-1"
+                    >
+                      <span>{isCreatingSkill ? '✕ Close' : '➕ New Skill'}</span>
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingKnowledge((prev) => !prev)}
+                    className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 transition-colors flex items-center gap-1"
+                  >
+                    <span>{isAddingKnowledge ? '✕ Close' : '💡 Add Insight'}</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Sub-view Content */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* DISTILLATION MODAL / ACCORDION */}
+              {isDistillOpen && (
+                <div className="p-4 rounded-xl bg-gradient-to-b from-amber-950/40 via-zinc-900/90 to-zinc-950 border border-amber-500/40 shadow-xl space-y-3 animate-in fade-in">
+                  <div className="flex items-center justify-between border-b border-amber-500/20 pb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-amber-400 text-base">⚡</span>
+                      <div>
+                        <h4 className="text-xs font-bold text-amber-200">Auto-Distill Workflow into Playbook</h4>
+                        <p className="text-[11px] text-zinc-400">
+                          Gemini analyzes {completedSteps.length} execution steps to extract triggers & procedural guidelines.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsDistillOpen(false);
+                        if (setDistillInitialData) setDistillInitialData(null);
+                      }}
+                      className="text-zinc-400 hover:text-zinc-200 text-xs p-1"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div>
+                      <label className="text-[11px] font-semibold text-zinc-300 block mb-1">
+                        Skill Slug Name (e.g. <span className="font-mono text-amber-400">deploy-flow</span>):
+                      </label>
+                      <input
+                        type="text"
+                        value={distillName}
+                        onChange={(e) => setDistillName(e.target.value)}
+                        placeholder="e.g. test-runner-flow"
+                        className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 font-mono focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <div className="flex items-center gap-3">
+                        <span className="text-[11px] text-zinc-400 font-semibold">Target Scope:</span>
+                        <label className="flex items-center gap-1.5 text-xs text-zinc-300 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="distillScope"
+                            value="workspace"
+                            checked={distillScope === 'workspace'}
+                            onChange={() => setDistillScope('workspace')}
+                            className="accent-amber-500"
+                          />
+                          <span>Workspace (<code className="text-[10px] text-emerald-400">.castor/skills/</code>)</span>
+                        </label>
+                        <label className="flex items-center gap-1.5 text-xs text-zinc-300 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="distillScope"
+                            value="global"
+                            checked={distillScope === 'global'}
+                            onChange={() => setDistillScope('global')}
+                            className="accent-amber-500"
+                          />
+                          <span>Global (<code className="text-[10px] text-purple-400">~/.castor/skills/</code>)</span>
+                        </label>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleDistillSubmit}
+                        disabled={isDistillLoading}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-md ${
+                          isDistillLoading
+                            ? 'bg-amber-900/50 text-amber-300 border border-amber-600/50 cursor-wait'
+                            : 'bg-amber-500 hover:bg-amber-400 text-black font-bold'
+                        }`}
+                      >
+                        {isDistillLoading ? (
+                          <>
+                            <span className="animate-spin">⏳</span>
+                            <span>Reflecting...</span>
+                          </>
+                        ) : (
+                          <>
+                            <span>⚡</span>
+                            <span>Distill Playbook</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {distillStatus && (
+                      <p className={`text-xs mt-2 font-mono ${distillStatus.includes('❌') ? 'text-red-400' : 'text-amber-300'}`}>
+                        {distillStatus}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* MANUAL SKILL CREATION FORM */}
+              {isCreatingSkill && (
+                <form
+                  onSubmit={handleCreateSkillSubmit}
+                  className="p-4 rounded-xl bg-zinc-900/90 border border-blue-500/30 shadow-xl space-y-3 animate-in fade-in"
+                >
+                  <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
+                    <h4 className="text-xs font-bold text-blue-300">Author New Custom Skill</h4>
+                    <button
+                      type="button"
+                      onClick={() => setIsCreatingSkill(false)}
+                      className="text-zinc-400 hover:text-zinc-200 text-xs"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Skill Name</label>
+                      <input
+                        type="text"
+                        required
+                        value={newSkillForm.name}
+                        onChange={(e) => setNewSkillForm({ ...newSkillForm, name: e.target.value })}
+                        placeholder="e.g. rust-wasm-pack"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1 text-xs text-zinc-200 font-mono focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Target Scope</label>
+                      <select
+                        value={newSkillForm.scope}
+                        onChange={(e) => setNewSkillForm({ ...newSkillForm, scope: e.target.value })}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
+                      >
+                        <option value="workspace">Workspace (.castor/skills/)</option>
+                        <option value="global">Global (~/.castor/skills/)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Description</label>
+                    <input
+                      type="text"
+                      value={newSkillForm.description}
+                      onChange={(e) => setNewSkillForm({ ...newSkillForm, description: e.target.value })}
+                      placeholder="Brief summary of when to load and follow this skill..."
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Triggers (comma-separated)</label>
+                    <input
+                      type="text"
+                      value={newSkillForm.triggers}
+                      onChange={(e) => setNewSkillForm({ ...newSkillForm, triggers: e.target.value })}
+                      placeholder="e.g. wasm, build, webassembly"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Markdown Instructions (SKILL.md)</label>
+                    <textarea
+                      rows={5}
+                      value={newSkillForm.content}
+                      onChange={(e) => setNewSkillForm({ ...newSkillForm, content: e.target.value })}
+                      placeholder="# Instructions&#10;1. Step one...&#10;2. Gotchas..."
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-xs text-zinc-200 font-mono resize-none focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  {createError && <p className="text-xs text-red-400 font-mono">{createError}</p>}
+
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setIsCreatingSkill(false)}
+                      className="px-3 py-1 rounded-lg text-xs text-zinc-400 hover:bg-zinc-800 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isCreatingLoading}
+                      className="px-3 py-1 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+                    >
+                      {isCreatingLoading ? 'Saving...' : 'Save Skill'}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* SECTION: SKILLS PLAYBOOKS */}
+              {skillsSubTab === 'skills' && (
+                <div className="space-y-3">
+                  {/* Scope filter pills & search bar */}
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-1">
+                      {['all', 'workspace', 'global', 'builtin'].map((scope) => (
+                        <button
+                          key={scope}
+                          type="button"
+                          onClick={() => setSkillFilterScope(scope)}
+                          className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors capitalize ${
+                            skillFilterScope === scope
+                              ? 'bg-zinc-800 text-white border border-zinc-700'
+                              : 'text-zinc-500 hover:text-zinc-300'
+                          }`}
+                        >
+                          {scope === 'builtin' ? 'Built-in' : scope}
+                        </button>
+                      ))}
+                    </div>
+
+                    <input
+                      type="text"
+                      value={skillSearchQuery}
+                      onChange={(e) => setSkillSearchQuery(e.target.value)}
+                      placeholder="Search skills or triggers..."
+                      className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500 w-44"
+                    />
+                  </div>
+
+                  {/* Skills List */}
+                  {isLoadingSkills ? (
+                    <div className="py-12 text-center text-xs text-zinc-500 flex items-center justify-center gap-2">
+                      <span className="animate-spin">⏳</span>
+                      <span>Loading skills registry...</span>
+                    </div>
+                  ) : filteredSkills.length > 0 ? (
+                    <div className="space-y-2.5">
+                      {filteredSkills.map((sk) => {
+                        const isExpanded = !!expandedSkillNames[sk.name];
+                        const scopeBadge =
+                          sk.scope === 'workspace'
+                            ? { label: 'Workspace', bg: 'bg-emerald-950/60 text-emerald-300 border-emerald-700/50' }
+                            : sk.scope === 'global'
+                            ? { label: 'Global', bg: 'bg-purple-950/60 text-purple-300 border-purple-700/50' }
+                            : { label: 'Built-in', bg: 'bg-blue-950/60 text-blue-300 border-blue-700/50' };
+
+                        return (
+                          <div
+                            key={`${sk.scope}-${sk.name}`}
+                            className="p-3 bg-zinc-900/60 hover:bg-zinc-900/90 border border-zinc-800/80 rounded-xl transition-all"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <h4 className="font-mono text-xs font-bold text-zinc-200">{sk.name}</h4>
+                                  <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded border ${scopeBadge.bg}`}>
+                                    {scopeBadge.label}
+                                  </span>
+                                  {sk.scripts && sk.scripts.length > 0 && (
+                                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
+                                      📜 {sk.scripts.length} {sk.scripts.length === 1 ? 'script' : 'scripts'}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                                  {sk.description || 'No description provided.'}
+                                </p>
+                                {sk.triggers && sk.triggers.length > 0 && (
+                                  <div className="flex items-center gap-1 mt-2 flex-wrap">
+                                    <span className="text-[10px] font-semibold text-zinc-500">Triggers:</span>
+                                    {sk.triggers.map((trig, i) => (
+                                      <span
+                                        key={i}
+                                        className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-zinc-950 text-blue-400 border border-zinc-800"
+                                      >
+                                        {trig}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleSkillExpand(sk.name)}
+                                  className="px-2 py-1 rounded text-[11px] font-semibold bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors"
+                                >
+                                  {isExpanded ? 'Collapse' : 'Inspect'}
+                                </button>
+                                {sk.scope !== 'builtin' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteSkill(sk.name, sk.scope)}
+                                    title="Delete custom skill"
+                                    className="p-1 rounded text-zinc-500 hover:text-red-400 hover:bg-red-950/40 transition-colors text-xs"
+                                  >
+                                    🗑️
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Expanded Markdown Body */}
+                            {isExpanded && (
+                              <div className="mt-3 pt-3 border-t border-zinc-800/80 bg-zinc-950/80 p-3 rounded-lg overflow-x-auto text-xs">
+                                <div className="text-[10px] font-mono text-zinc-500 mb-2 pb-1 border-b border-zinc-800 flex items-center justify-between">
+                                  <span>Path: {sk.path || `${sk.name}/SKILL.md`}</span>
+                                </div>
+                                <SimpleMarkdownRenderer content={sk.content || '*Empty playbook markdown.*'} />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="py-12 text-center text-zinc-500">
+                      <div className="text-3xl mb-2">🧠</div>
+                      <p className="text-xs font-semibold text-zinc-400">No matching skills found</p>
+                      <p className="text-[11px] text-zinc-600 mt-1 max-w-sm mx-auto">
+                        Execute actions to auto-distill workflows with <code className="text-amber-400 font-mono">/learn</code> or click <span className="text-blue-400">➕ New Skill</span> to author custom playbooks.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* SECTION: PERSISTENT KNOWLEDGE (LEARNED INSIGHTS) */}
+              {skillsSubTab === 'knowledge' && (
+                <div className="space-y-3">
+                  {/* Add knowledge form */}
+                  {isAddingKnowledge && (
+                    <form
+                      onSubmit={handleAddKnowledgeSubmit}
+                      className="p-3 bg-zinc-900/90 border border-emerald-500/30 rounded-xl space-y-2 animate-in fade-in"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-emerald-300">Add Learned Insight</span>
+                        <button
+                          type="button"
+                          onClick={() => setIsAddingKnowledge(false)}
+                          className="text-zinc-500 hover:text-zinc-300 text-xs"
+                        >
+                          ✕
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={newKnowledgeCategory}
+                          onChange={(e) => setNewKnowledgeCategory(e.target.value)}
+                          className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-200"
+                        >
+                          <option value="general">General</option>
+                          <option value="pattern">Pattern</option>
+                          <option value="gotcha">Gotcha / Pitfall</option>
+                          <option value="architecture">Architecture</option>
+                        </select>
+                        <input
+                          type="text"
+                          required
+                          value={newKnowledgeContent}
+                          onChange={(e) => setNewKnowledgeContent(e.target.value)}
+                          placeholder="e.g. Always use py_compile before committing Python changes..."
+                          className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500"
+                        />
+                        <button
+                          type="submit"
+                          disabled={isKnowledgeLoading}
+                          className="px-3 py-1 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors"
+                        >
+                          {isKnowledgeLoading ? 'Saving...' : 'Add'}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  {isLoadingKnowledge ? (
+                    <div className="py-12 text-center text-xs text-zinc-500 flex items-center justify-center gap-2">
+                      <span className="animate-spin">⏳</span>
+                      <span>Loading knowledge base...</span>
+                    </div>
+                  ) : knowledgeItems.length > 0 ? (
+                    <div className="space-y-2">
+                      {knowledgeItems.map((item) => (
+                        <div
+                          key={item.id}
+                          className="p-3 bg-zinc-900/60 hover:bg-zinc-900 border border-zinc-800/80 rounded-xl flex items-start justify-between gap-3 text-xs transition-colors"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-[10px] font-mono uppercase px-1.5 py-0.2 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-700/50">
+                                {item.category || 'general'}
+                              </span>
+                              <span className="text-[10px] font-mono text-zinc-500">
+                                {item.scope || 'workspace'} • {new Date(item.created_at || Date.now()).toLocaleDateString()}
+                              </span>
+                            </div>
+                            <p className="text-zinc-200 text-xs leading-relaxed">{item.content}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteKnowledge(item.id)}
+                            title="Delete insight"
+                            className="p-1 rounded text-zinc-500 hover:text-red-400 hover:bg-red-950/40 transition-colors text-xs"
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="py-12 text-center text-zinc-500">
+                      <div className="text-3xl mb-2">💡</div>
+                      <p className="text-xs font-semibold text-zinc-400">No learned insights yet</p>
+                      <p className="text-[11px] text-zinc-600 mt-1 max-w-sm mx-auto">
+                        Type <code className="text-emerald-400 font-mono">/learn [insight]</code> in the prompt bar or click <span className="text-emerald-400">💡 Add Insight</span> above.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -1167,6 +1965,9 @@ function ChatWindow() {
   const [artifacts, setArtifacts] = useState([]);
   const [activeArtifact, setActiveArtifact] = useState(null);
   const [isArtifactsOpen, setIsArtifactsOpen] = useState(false);
+  const [sidecarTab, setSidecarTab] = useState('artifacts');
+  const [workflowDistillSuggestion, setWorkflowDistillSuggestion] = useState(null);
+  const [distillInitialData, setDistillInitialData] = useState(null);
 
   // ── Mode Selector & Custom Agent State (Cursor Parity) ──────────────────────
   const [composerMode, setComposerMode] = useState(() => {
@@ -2390,6 +3191,8 @@ function ChatWindow() {
         if (data.diagnostics) {
           setDiagnosticsData(data.diagnostics);
         }
+      } else if (data.type === 'workflow_distill_suggestion') {
+        setWorkflowDistillSuggestion(data);
       }
 
 
@@ -3065,6 +3868,19 @@ function ChatWindow() {
                   {artifacts.length}
                 </span>
               )}
+            </button>
+
+            {/* Phase 12: Self-Evolving Skills & Persistent Learned Playbooks Header Button */}
+            <button
+              onClick={() => {
+                setSidecarTab('skills');
+                setIsArtifactsOpen(true);
+              }}
+              className="text-xs px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm border text-zinc-400 hover:text-zinc-200 bg-zinc-850 hover:bg-zinc-800 border-zinc-750"
+              title="View Self-Evolving Skills & Persistent Learned Playbooks (Phase 12)"
+            >
+              <span>🧠</span>
+              <span>Skills & Playbooks</span>
             </button>
 
             {/* Phase 6: Terminal & Background Process Watchdog Header Button */}
@@ -4204,6 +5020,50 @@ function ChatWindow() {
                 </div>
               )}
 
+              {/* Phase 12: Auto-Distillation Suggestion Banner */}
+              {workflowDistillSuggestion && (
+                <div className="mb-2.5 p-2 px-3 rounded-xl bg-gradient-to-r from-amber-950/70 via-purple-950/50 to-blue-950/40 border border-amber-500/40 flex items-center justify-between text-xs animate-in fade-in slide-in-from-bottom-2 shadow-lg">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="text-amber-400 text-sm animate-pulse">💡</span>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-semibold text-amber-200">Task Completed ({workflowDistillSuggestion.steps_count} steps)</span>
+                        <span className="text-amber-400/80 text-[10px] bg-amber-950/60 border border-amber-600/30 px-1.5 py-0.2 rounded font-mono">
+                          Auto-Playbook Available
+                        </span>
+                      </div>
+                      <p className="text-zinc-300 text-[11px] truncate mt-0.5">
+                        "{workflowDistillSuggestion.goal}"
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0 ml-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDistillInitialData({
+                          goal: workflowDistillSuggestion.goal,
+                          stepsCount: workflowDistillSuggestion.steps_count,
+                        });
+                        setSidecarTab('skills');
+                        setIsArtifactsOpen(true);
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-amber-500/25 hover:bg-amber-500/40 text-amber-200 border border-amber-500/50 font-medium text-[11px] transition-colors flex items-center gap-1 shadow-sm"
+                    >
+                      <span>⚡ Distill Skill</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setWorkflowDistillSuggestion(null)}
+                      className="p-1 text-zinc-400 hover:text-zinc-200 rounded hover:bg-zinc-800 text-xs transition-colors"
+                      title="Dismiss"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <TextareaAutosize
                 minRows={1}
                 maxRows={8}
@@ -5024,7 +5884,7 @@ function ChatWindow() {
         </div>
       )}
 
-      {/* Antigravity-Style Living Artifacts & Action Replay Sidecar Drawer */}
+      {/* Antigravity-Style Living Artifacts, Action Replay & Skills Sidecar Drawer */}
       <SidecarDrawer
         isOpen={isArtifactsOpen}
         onClose={() => setIsArtifactsOpen(false)}
@@ -5032,6 +5892,12 @@ function ChatWindow() {
         activeArtifact={activeArtifact}
         onSelectArtifact={(art) => setActiveArtifact(art)}
         scratchpad={scratchpad}
+        activeTab={sidecarTab}
+        setActiveTab={setSidecarTab}
+        activeProject={activeProject}
+        currentGoal={goal}
+        distillInitialData={distillInitialData}
+        setDistillInitialData={setDistillInitialData}
       />
 
       {/* ── Phase 6: Terminal & Background Process Watchdog Modal ─────────────── */}
