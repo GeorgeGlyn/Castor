@@ -687,6 +687,16 @@ function ChatWindow() {
   const [isSwarmPanelExpanded, setIsSwarmPanelExpanded] = useState(true);
   const [expandedWorkerReports, setExpandedWorkerReports] = useState({});
 
+  // ── Phase 6: Background Process & Terminal Watchdog State ─────────────────
+  const [backgroundTasks, setBackgroundTasks] = useState([]);
+  const [isWatchdogOpen, setIsWatchdogOpen] = useState(false);
+  const [selectedWatchdogTaskId, setSelectedWatchdogTaskId] = useState(null);
+  const [watchdogLogsMap, setWatchdogLogsMap] = useState({});
+  const [watchdogNewCmd, setWatchdogNewCmd] = useState('');
+  const [watchdogStdinInput, setWatchdogStdinInput] = useState('');
+  const [isWatchdogAutoScroll, setIsWatchdogAutoScroll] = useState(true);
+  const watchdogLogsEndRef = useRef(null);
+
   const fetchProviders = useCallback(async () => {
     try {
       const res = await fetch('http://localhost:8000/api/providers');
@@ -725,6 +735,107 @@ function ChatWindow() {
       setIsUpdatingProvider(false);
     }
   };
+
+  // ── Phase 6: Terminal & Background Process Watchdog Helpers ───────────────
+  const fetchTasks = useCallback(async () => {
+    try {
+      const res = await fetch('http://localhost:8000/api/tasks?include_logs=true&tail=50');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.tasks) setBackgroundTasks(data.tasks);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch tasks:', err);
+    }
+  }, []);
+
+  const fetchTaskLogs = useCallback(async (taskId) => {
+    if (!taskId) return;
+    try {
+      const res = await fetch(`http://localhost:8000/api/tasks/${taskId}/logs?tail=100`);
+      if (res.ok) {
+        const data = await res.json();
+        setWatchdogLogsMap((prev) => ({
+          ...prev,
+          [taskId]: data.logs || '',
+        }));
+      }
+    } catch (err) {
+      console.warn(`Failed to fetch logs for ${taskId}:`, err);
+    }
+  }, []);
+
+  const handleStartBackgroundTask = async (cmd, name = '') => {
+    if (!cmd.trim()) return;
+    try {
+      const res = await fetch('http://localhost:8000/api/tasks/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          command: cmd.trim(),
+          cwd: activeProject?.path || null,
+          name: name.trim() || undefined,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.tasks) setBackgroundTasks(data.tasks);
+        setWatchdogNewCmd('');
+        setAgentStatus(data.message || 'Started background process');
+      }
+    } catch (err) {
+      console.error('Failed to start task:', err);
+    }
+  };
+
+  const handleManageTask = async (taskId, action, inputText = null) => {
+    if (!taskId) return;
+    try {
+      const res = await fetch(`http://localhost:8000/api/tasks/${taskId}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          input_text: inputText,
+          tail: 50,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.tasks) setBackgroundTasks(data.tasks);
+        setAgentStatus(data.message || `Action ${action} executed`);
+        fetchTaskLogs(taskId);
+      }
+    } catch (err) {
+      console.error(`Failed to manage task ${taskId}:`, err);
+    }
+  };
+
+  const handleSendStdin = (taskId) => {
+    if (!taskId || !watchdogStdinInput) return;
+    handleManageTask(taskId, 'send_input', watchdogStdinInput);
+    setWatchdogStdinInput('');
+  };
+
+  useEffect(() => {
+    if (!isWatchdogOpen) return;
+    fetchTasks();
+    const targetId = selectedWatchdogTaskId || backgroundTasks[0]?.task_id;
+    if (targetId) fetchTaskLogs(targetId);
+
+    const interval = setInterval(() => {
+      fetchTasks();
+      const currentTarget = selectedWatchdogTaskId || backgroundTasks[0]?.task_id;
+      if (currentTarget) fetchTaskLogs(currentTarget);
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [isWatchdogOpen, selectedWatchdogTaskId, fetchTasks, fetchTaskLogs, backgroundTasks]);
+
+  useEffect(() => {
+    if (isWatchdogOpen && isWatchdogAutoScroll) {
+      watchdogLogsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [watchdogLogsMap, isWatchdogOpen, isWatchdogAutoScroll]);
 
   // ── Reference Images Upload & Clipboard State ─────────────────────────────
   const [attachedImages, setAttachedImages] = useState([]);
@@ -1208,6 +1319,9 @@ function ChatWindow() {
         if (data.active_monitor) {
           setActiveMonitorIndex(data.active_monitor);
         }
+        if (data.tasks) {
+          setBackgroundTasks(data.tasks);
+        }
       } else if (data.type === 'monitor_changed') {
         if (data.monitor_index) {
           setActiveMonitorIndex(data.monitor_index);
@@ -1449,6 +1563,26 @@ function ChatWindow() {
               error: ev.error,
             },
           }));
+        }
+      } else if (data.type === 'tasks_list') {
+        if (data.tasks) {
+          setBackgroundTasks(data.tasks);
+        }
+      } else if (data.type === 'task_watchdog_event') {
+        if (data.tasks) {
+          setBackgroundTasks(data.tasks);
+        }
+        if (data.event_name === 'url_detected' && data.data?.url) {
+          setAgentStatus(`🌐 Process listening on ${data.data.url}`);
+        } else if (data.event_name === 'task_crashed') {
+          setAgentStatus(`⚠️ Background process ${data.data?.task_id || ''} crashed (exit ${data.data?.exit_code})`);
+        }
+      } else if (data.type === 'task_action_result') {
+        if (data.tasks) {
+          setBackgroundTasks(data.tasks);
+        }
+        if (data.message) {
+          setAgentStatus(data.message);
         }
       }
 
@@ -2113,6 +2247,45 @@ function ChatWindow() {
               {artifacts.length > 0 && (
                 <span className="text-[10px] font-mono bg-blue-600 text-white px-1.5 py-0.2 rounded-full font-bold">
                   {artifacts.length}
+                </span>
+              )}
+            </button>
+
+            {/* Phase 6: Terminal & Background Process Watchdog Header Button */}
+            <button
+              onClick={() => {
+                setIsWatchdogOpen((prev) => !prev);
+                fetchTasks();
+              }}
+              className={`text-xs px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5 shadow-sm border ${
+                backgroundTasks.some((t) => t.status === 'running')
+                  ? 'bg-emerald-950/60 hover:bg-emerald-900/70 text-emerald-300 border-emerald-700/60 animate-in fade-in-50'
+                  : 'text-zinc-400 hover:text-zinc-200 bg-zinc-850 hover:bg-zinc-800 border-zinc-750'
+              }`}
+              title="Terminal & Background Process Watchdog (Dev servers, ports, daemons)"
+            >
+              <span className="relative flex h-2 w-2">
+                {backgroundTasks.some((t) => t.status === 'running') ? (
+                  <>
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </>
+                ) : (
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-zinc-600"></span>
+                )}
+              </span>
+              <span>Watchdog</span>
+              {backgroundTasks.length > 0 && (
+                <span
+                  className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full font-bold ${
+                    backgroundTasks.some((t) => t.status === 'running')
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-zinc-700 text-zinc-300'
+                  }`}
+                >
+                  {backgroundTasks.filter((t) => t.status === 'running').length > 0
+                    ? `${backgroundTasks.filter((t) => t.status === 'running').length} Active`
+                    : backgroundTasks.length}
                 </span>
               )}
             </button>
@@ -3820,6 +3993,333 @@ function ChatWindow() {
         onSelectArtifact={(art) => setActiveArtifact(art)}
         scratchpad={scratchpad}
       />
+
+      {/* ── Phase 6: Terminal & Background Process Watchdog Modal ─────────────── */}
+      {isWatchdogOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setIsWatchdogOpen(false)}
+        >
+          <div
+            className="bg-[#101015] border border-blue-900/50 rounded-2xl max-w-5xl w-full h-[85vh] shadow-2xl flex flex-col overflow-hidden ring-1 ring-blue-500/20"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-zinc-800 bg-[#12121a] flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="relative flex h-3 w-3 items-center justify-center">
+                  {backgroundTasks.some((t) => t.status === 'running') ? (
+                    <>
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                    </>
+                  ) : (
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-zinc-600"></span>
+                  )}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-sm font-semibold text-zinc-100 tracking-wide flex items-center gap-1.5">
+                      <span>Terminal & Process Watchdog</span>
+                      <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950/50 border border-cyan-800/60 px-1.5 py-0.5 rounded">
+                        Phase 6
+                      </span>
+                    </h2>
+                  </div>
+                  <p className="text-[11px] text-zinc-400 font-mono">
+                    Persistent non-blocking dev servers, build tools & background daemons
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2.5">
+                <button
+                  onClick={() => fetchTasks()}
+                  className="px-2.5 py-1 text-xs font-mono text-zinc-400 hover:text-zinc-200 bg-zinc-800/80 hover:bg-zinc-700/80 rounded-lg border border-zinc-700/60 transition-colors flex items-center gap-1.5"
+                  title="Refresh tasks and logs"
+                >
+                  <span>🔄</span>
+                  <span>Refresh</span>
+                </button>
+                <button
+                  onClick={() => setIsWatchdogOpen(false)}
+                  className="text-zinc-400 hover:text-zinc-200 text-sm font-mono w-7 h-7 flex items-center justify-center rounded-lg hover:bg-zinc-800 transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Process Launcher Bar */}
+            <div className="px-6 py-3 bg-[#0d0d12] border-b border-zinc-800/80 flex items-center gap-3 shrink-0">
+              <span className="text-xs font-mono text-zinc-400 shrink-0">⚡ Run Daemon:</span>
+              <div className="flex-1 flex items-center gap-2">
+                <input
+                  type="text"
+                  value={watchdogNewCmd}
+                  onChange={(e) => setWatchdogNewCmd(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleStartBackgroundTask(watchdogNewCmd);
+                  }}
+                  placeholder="e.g. npm run dev, python -m http.server 8000, vite, cargo watch..."
+                  className="flex-1 bg-zinc-900 border border-zinc-750 rounded-xl px-3 py-1.5 text-xs text-zinc-200 font-mono placeholder:text-zinc-600 focus:outline-none focus:border-blue-500/80"
+                />
+                <button
+                  onClick={() => handleStartBackgroundTask(watchdogNewCmd)}
+                  disabled={!watchdogNewCmd.trim()}
+                  className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-medium font-mono transition-colors flex items-center gap-1.5 shrink-0"
+                >
+                  <span>🚀</span>
+                  <span>Launch</span>
+                </button>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  onClick={() => setWatchdogNewCmd('npm run dev')}
+                  className="text-[10px] font-mono px-2 py-1 bg-zinc-800/60 hover:bg-zinc-750 text-zinc-400 hover:text-zinc-200 rounded-lg border border-zinc-700/50 transition-colors"
+                >
+                  npm run dev
+                </button>
+                <button
+                  onClick={() => setWatchdogNewCmd('python -m http.server 8000')}
+                  className="text-[10px] font-mono px-2 py-1 bg-zinc-800/60 hover:bg-zinc-750 text-zinc-400 hover:text-zinc-200 rounded-lg border border-zinc-700/50 transition-colors"
+                >
+                  http.server 8000
+                </button>
+              </div>
+            </div>
+
+            {/* Main Two-Column Viewport */}
+            <div className="flex-1 min-h-0 flex overflow-hidden">
+              {/* Left Column: Registered Tasks List */}
+              <div className="w-80 border-r border-zinc-800 bg-[#0d0d12]/60 flex flex-col shrink-0">
+                <div className="px-4 py-2.5 border-b border-zinc-800/80 flex items-center justify-between text-[11px] font-mono text-zinc-400">
+                  <span>Registered Processes</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300">
+                    {backgroundTasks.length}
+                  </span>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                  {backgroundTasks.length === 0 ? (
+                    <div className="text-center py-12 px-4 text-zinc-600 font-mono text-xs">
+                      <div className="text-3xl mb-2">💤</div>
+                      <p className="text-zinc-400 font-medium">No background processes</p>
+                      <p className="text-[11px] mt-1 text-zinc-600">
+                        Launch a dev server above or instruct Castor with <code>is_background: true</code>.
+                      </p>
+                    </div>
+                  ) : (
+                    backgroundTasks.map((t) => {
+                      const isSelected = (selectedWatchdogTaskId || backgroundTasks[0]?.task_id) === t.task_id;
+                      const isRunning = t.status === 'running';
+                      const isCrashed = t.status.includes('crashed');
+
+                      return (
+                        <div
+                          key={t.task_id}
+                          onClick={() => {
+                            setSelectedWatchdogTaskId(t.task_id);
+                            fetchTaskLogs(t.task_id);
+                          }}
+                          className={`rounded-xl p-3 border transition-all cursor-pointer ${
+                            isSelected
+                              ? 'bg-blue-950/30 border-blue-600/60 ring-1 ring-blue-500/30'
+                              : 'bg-zinc-900/60 hover:bg-zinc-850/80 border-zinc-800/80'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-1.5 mb-1.5">
+                            <span className="text-xs font-semibold text-zinc-200 truncate flex items-center gap-1.5">
+                              <span className="font-mono text-[10px] text-zinc-500">[{t.task_id}]</span>
+                              <span>{t.name || t.command}</span>
+                            </span>
+                            <span
+                              className={`text-[9px] font-mono px-1.5 py-0.5 rounded uppercase font-bold shrink-0 ${
+                                isRunning
+                                  ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/60'
+                                  : isCrashed
+                                  ? 'bg-rose-950/60 text-rose-400 border border-rose-800/60'
+                                  : 'bg-zinc-800 text-zinc-400 border border-zinc-700/60'
+                              }`}
+                            >
+                              {isRunning ? `Running (${t.uptime_seconds || 0}s)` : t.status}
+                            </span>
+                          </div>
+
+                          <p className="text-[11px] font-mono text-zinc-400 truncate mb-2">
+                            {t.command}
+                          </p>
+
+                          {/* Detected URLs */}
+                          {t.detected_urls && t.detected_urls.length > 0 && (
+                            <div className="space-y-1 mb-2">
+                              {t.detected_urls.map((url, uIdx) => (
+                                <a
+                                  key={uIdx}
+                                  href={url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="inline-flex items-center gap-1 text-[10px] font-mono text-cyan-300 hover:text-cyan-100 bg-cyan-950/40 hover:bg-cyan-900/60 px-2 py-0.5 rounded border border-cyan-800/50 transition-colors"
+                                >
+                                  <span>🌐</span>
+                                  <span>{url}</span>
+                                  <span>↗</span>
+                                </a>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Quick Actions */}
+                          <div className="flex items-center justify-between pt-2 border-t border-zinc-800/60">
+                            <span className="text-[10px] font-mono text-zinc-500">PID: {t.pid}</span>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleManageTask(t.task_id, 'restart');
+                                }}
+                                className="text-[10px] font-mono px-2 py-0.5 bg-zinc-800 hover:bg-zinc-750 text-zinc-300 rounded border border-zinc-700/60 transition-colors"
+                                title="Restart process"
+                              >
+                                🔄 Restart
+                              </button>
+                              {isRunning && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleManageTask(t.task_id, 'kill');
+                                  }}
+                                  className="text-[10px] font-mono px-2 py-0.5 bg-rose-950/60 hover:bg-rose-900/60 text-rose-300 rounded border border-rose-800/60 transition-colors"
+                                  title="Kill process cleanly"
+                                >
+                                  ⏹️ Kill
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* Right Column: Live Terminal & Interactive Stdin */}
+              {(() => {
+                const currentTask = backgroundTasks.find(
+                  (t) => t.task_id === (selectedWatchdogTaskId || backgroundTasks[0]?.task_id)
+                );
+
+                if (!currentTask) {
+                  return (
+                    <div className="flex-1 flex flex-col items-center justify-center text-zinc-600 font-mono text-xs">
+                      <div className="text-4xl mb-3">💻</div>
+                      <p className="text-zinc-400 font-medium">Select a background process</p>
+                      <p className="text-zinc-600 mt-1 max-w-sm text-center">
+                        View live stdout and stderr terminal logs, inspect detected ports, and interact with running daemons.
+                      </p>
+                    </div>
+                  );
+                }
+
+                const currentLogs = watchdogLogsMap[currentTask.task_id] || currentTask.logs || '[No logs received yet]';
+
+                return (
+                  <div className="flex-1 flex flex-col bg-[#08080b] min-w-0 overflow-hidden">
+                    {/* Terminal Header */}
+                    <div className="px-5 py-3 border-b border-zinc-800/90 bg-[#0e0e14] flex items-center justify-between shrink-0">
+                      <div className="flex items-center gap-2.5 truncate">
+                        <span className="text-xs font-mono font-bold text-zinc-200">
+                          {currentTask.name || currentTask.task_id}
+                        </span>
+                        <span className="text-[10px] font-mono text-zinc-500 truncate">
+                          PID {currentTask.pid} • {currentTask.cwd}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <label className="flex items-center gap-1.5 text-[11px] font-mono text-zinc-400 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={isWatchdogAutoScroll}
+                            onChange={(e) => setIsWatchdogAutoScroll(e.target.checked)}
+                            className="rounded bg-zinc-800 border-zinc-700 text-blue-500 focus:ring-0"
+                          />
+                          <span>Auto-scroll</span>
+                        </label>
+                        <button
+                          onClick={() => fetchTaskLogs(currentTask.task_id)}
+                          className="text-[11px] font-mono text-zinc-400 hover:text-zinc-200 px-2 py-1 bg-zinc-800/60 rounded border border-zinc-700/60 transition-colors"
+                        >
+                          Tail
+                        </button>
+                        {currentTask.status === 'running' && (
+                          <button
+                            onClick={() => handleManageTask(currentTask.task_id, 'kill')}
+                            className="text-[11px] font-mono text-rose-400 hover:text-rose-200 px-2 py-1 bg-rose-950/40 rounded border border-rose-800/60 transition-colors"
+                          >
+                            ⏹️ Terminate
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Terminal Output Viewport */}
+                    <div className="flex-1 p-4 overflow-y-auto font-mono text-xs text-zinc-300 bg-[#060608] select-text whitespace-pre-wrap leading-relaxed">
+                      {currentLogs}
+                      <div ref={watchdogLogsEndRef} className="h-2" />
+                    </div>
+
+                    {/* Interactive Stdin Dock */}
+                    <div className="p-3 bg-[#0d0d14] border-t border-zinc-800/90 flex items-center gap-2 shrink-0">
+                      <span className="text-xs font-mono text-emerald-400 font-bold shrink-0">&gt;&gt;</span>
+                      <input
+                        type="text"
+                        value={watchdogStdinInput}
+                        onChange={(e) => setWatchdogStdinInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSendStdin(currentTask.task_id);
+                        }}
+                        disabled={currentTask.status !== 'running'}
+                        placeholder={
+                          currentTask.status === 'running'
+                            ? 'Send stdin input to process (e.g. y, Enter, command)...'
+                            : 'Process is not running (stdin disabled)'
+                        }
+                        className="flex-1 bg-zinc-900 border border-zinc-750 rounded-lg px-3 py-1.5 text-xs text-zinc-200 font-mono placeholder:text-zinc-600 focus:outline-none focus:border-blue-500/80 disabled:opacity-40"
+                      />
+                      <button
+                        onClick={() => handleSendStdin(currentTask.task_id)}
+                        disabled={currentTask.status !== 'running' || !watchdogStdinInput}
+                        className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed text-zinc-200 rounded-lg text-xs font-mono transition-colors shrink-0"
+                      >
+                        Send ↵
+                      </button>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={() => handleManageTask(currentTask.task_id, 'send_input', 'y')}
+                          disabled={currentTask.status !== 'running'}
+                          className="px-2 py-1 text-[10px] font-mono bg-zinc-850 hover:bg-zinc-750 disabled:opacity-30 text-zinc-300 rounded border border-zinc-700 transition-colors"
+                        >
+                          y
+                        </button>
+                        <button
+                          onClick={() => handleManageTask(currentTask.task_id, 'send_input', 'n')}
+                          disabled={currentTask.status !== 'running'}
+                          className="px-2 py-1 text-[10px] font-mono bg-zinc-850 hover:bg-zinc-750 disabled:opacity-30 text-zinc-300 rounded border border-zinc-700 transition-colors"
+                        >
+                          n
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
 
   );
