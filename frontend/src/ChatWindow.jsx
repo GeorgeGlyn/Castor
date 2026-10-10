@@ -1942,6 +1942,26 @@ function getBackoffDelay(attempt) {
 
 function ChatWindow() {
   const [goal, setGoal] = useState('');
+
+  // ── Projects State ────────────────────────────────────────────────────────
+  const [projects, setProjects] = useState([]);
+  const [activeProject, setActiveProject] = useState(() => {
+    try {
+      const saved = localStorage.getItem('castor_active_project');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [autoCreateProject, setAutoCreateProject] = useState(() => {
+    try {
+      const saved = localStorage.getItem('castor_auto_create_project');
+      return saved === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [permissionMode, setPermissionMode] = useState(() => {
     try {
       return localStorage.getItem('castor_permission_mode') || 'guarded';
@@ -2254,23 +2274,6 @@ function ChatWindow() {
     }
   };
 
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'o') {
-        e.preventDefault();
-        setIsSymbolsModalOpen((prev) => !prev);
-        fetchSymbolStats();
-      }
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'd') {
-        e.preventDefault();
-        setIsDiagnosticsModalOpen((prev) => !prev);
-        fetchDiagnostics();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [fetchSymbolStats, fetchDiagnostics]);
-
   // ── Phase 8: Checkpoint & Diff Helpers ────────────────────────────────────
   const fetchCheckpointDiff = useCallback(async (checkpointId) => {
     if (!checkpointId) return;
@@ -2416,7 +2419,7 @@ function ChatWindow() {
   const handleFixDiagnosticWithAgent = (issue) => {
     if (!issue) return;
     const fixPrompt = `Please fix the compiler diagnostic ${issue.severity.toUpperCase()} in \`${issue.file}\` at line ${issue.line}, column ${issue.column}:\n"${issue.message}"\nSource: [${issue.source}]`;
-    setInputMessage(fixPrompt);
+    setGoal(fixPrompt);
     setIsDiagnosticsModalOpen(false);
     playSoundCue('start_mic');
   };
@@ -2424,6 +2427,24 @@ function ChatWindow() {
   useEffect(() => {
     fetchDiagnostics();
   }, [fetchDiagnostics]);
+
+  // Global Keyboard Shortcuts (Ctrl+Shift+O for Symbols, Ctrl+Shift+D for Diagnostics)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'o') {
+        e.preventDefault();
+        setIsSymbolsModalOpen((prev) => !prev);
+        fetchSymbolStats();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        setIsDiagnosticsModalOpen((prev) => !prev);
+        fetchDiagnostics();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [fetchSymbolStats, fetchDiagnostics]);
 
   // ── Reference Images Upload & Clipboard State ─────────────────────────────
   const [attachedImages, setAttachedImages] = useState([]);
@@ -2492,26 +2513,6 @@ function ChatWindow() {
   // ── Antigravity Parity: Slash Commands Autocomplete State ───────────────────
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [slashSelectedIdx, setSlashSelectedIdx] = useState(0);
-
-  // ── Projects State ────────────────────────────────────────────────────────
-  const [projects, setProjects] = useState([]);
-  const [activeProject, setActiveProject] = useState(() => {
-    try {
-      const saved = localStorage.getItem('castor_active_project');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
-
-  const [autoCreateProject, setAutoCreateProject] = useState(() => {
-    try {
-      const saved = localStorage.getItem('castor_auto_create_project');
-      return saved === 'true';
-    } catch {
-      return false;
-    }
-  });
 
   // ── Multi-Monitor Display State ───────────────────────────────────────────
   const [monitors, setMonitors] = useState([]);
